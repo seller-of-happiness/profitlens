@@ -1,0 +1,71 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String           @id @default(cuid())
+  email     String           @unique
+  password  String
+  name      String?
+  plan      SubscriptionPlan @default(FREE)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+  reports   Report[]
+
+  @@map("users")
+}
+
+model Report {
+  id           String      @id @default(cuid())
+  userId       String
+  user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  fileName     String
+  marketplace  Marketplace
+  uploadDate   DateTime    @default(now())
+  processed    Boolean     @default(false)
+  totalRevenue Float?
+  totalProfit  Float?
+  profitMargin Float?
+  salesData    SalesData[]
+
+  @@map("reports")
+}
+
+model SalesData {
+  id           String   @id @default(cuid())
+  reportId     String
+  report       Report   @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  sku          String
+  productName  String
+  saleDate     DateTime
+  quantity     Int
+  price        Float
+  revenue      Float
+  netProfit    Float
+  profitMargin Float
+  commission   Float
+  logistics    Float
+  storage      Float
+
+  @@map("sales_data")
+}
+
+enum SubscriptionPlan {
+  FREE
+  START
+  BUSINESS
+  PRO
+}
+
+enum Marketplace {
+  WILDBERRIES
+  OZON
+}

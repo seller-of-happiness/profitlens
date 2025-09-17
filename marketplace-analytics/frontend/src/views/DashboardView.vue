@@ -72,7 +72,7 @@
           :value="analytics.totalProfit"
           format="currency"
           color="green"
-          :icon="TrendingUpIcon"
+          :icon="ArrowTrendingUpIcon"
           description="После всех комиссий"
         />
         
@@ -206,7 +206,7 @@ import LineChart from '@/components/charts/LineChart.vue'
 import PieChart from '@/components/charts/PieChart.vue'
 import {
   CurrencyDollarIcon,
-  TrendingUpIcon,
+  ArrowTrendingUpIcon,
   ChartBarIcon,
   ShoppingBagIcon,
   CloudArrowUpIcon,

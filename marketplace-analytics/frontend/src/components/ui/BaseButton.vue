@@ -34,7 +34,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useSlots } from 'vue'
 
 interface Props {
   variant?: 'primary' | 'secondary' | 'success' | 'danger' | 'outline'
@@ -58,6 +58,8 @@ const props = withDefaults(defineProps<Props>(), {
 defineEmits<{
   click: [event: MouseEvent]
 }>()
+
+const slots = useSlots()
 
 const baseClasses = 'inline-flex items-center justify-center border font-medium rounded-md shadow-sm focus:outline-none focus:ring-2 focus:ring-offset-2 transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed'
 
@@ -83,7 +85,7 @@ const buttonClasses = computed(() => [
 ])
 
 const iconClasses = computed(() => {
-  const hasText = !!$slots.default
+  const hasText = !!slots.default
   return [
     'h-5 w-5',
     hasText ? (props.size === 'sm' ? 'mr-1.5' : 'mr-2') : '',

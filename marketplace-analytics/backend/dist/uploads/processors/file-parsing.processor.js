@@ -39,11 +39,26 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                 };
             }));
             await this.prisma.$transaction(async (tx) => {
-                await tx.salesData.createMany({
-                    data: salesData,
+                const validSalesData = salesData.filter(item => {
+                    const isValidDate = item.saleDate instanceof Date && !isNaN(item.saleDate.getTime());
+                    const hasRequiredFields = item.sku && item.productName && item.quantity > 0 && item.price >= 0;
+                    if (!isValidDate) {
+                        this.logger.warn(`Filtering out item with invalid date: SKU ${item.sku}, Date: ${item.saleDate}`);
+                    }
+                    if (!hasRequiredFields) {
+                        this.logger.warn(`Filtering out item with missing required fields: SKU ${item.sku}`);
+                    }
+                    return isValidDate && hasRequiredFields;
                 });
-                const totalRevenue = salesData.reduce((sum, item) => sum + item.revenue, 0);
-                const totalProfit = salesData.reduce((sum, item) => sum + item.netProfit, 0);
+                if (validSalesData.length === 0) {
+                    throw new Error('No valid sales data found after filtering. Please check your file format.');
+                }
+                this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${salesData.length} total records`);
+                await tx.salesData.createMany({
+                    data: validSalesData,
+                });
+                const totalRevenue = validSalesData.reduce((sum, item) => sum + item.revenue, 0);
+                const totalProfit = validSalesData.reduce((sum, item) => sum + item.netProfit, 0);
                 const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
                 await tx.report.update({
                     where: { id: reportId },
@@ -119,10 +134,15 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (!dateField || !skuField || !nameField || !priceField || !quantityField) {
             return null;
         }
+        const parsedDate = this.parseAndValidateDate(dateField);
+        if (!parsedDate) {
+            this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
+            return null;
+        }
         return {
             sku: String(skuField),
             productName: String(nameField),
-            saleDate: new Date(dateField),
+            saleDate: parsedDate,
             quantity: parseInt(quantityField) || 1,
             price: parseFloat(priceField) || 0,
             commission: parseFloat(commissionField) || 0,
@@ -138,14 +158,85 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (!dateField || !skuField || !nameField || !priceField || !quantityField) {
             return null;
         }
+        const parsedDate = this.parseAndValidateDate(dateField);
+        if (!parsedDate) {
+            this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
+            return null;
+        }
         return {
             sku: String(skuField),
             productName: String(nameField),
-            saleDate: new Date(dateField),
+            saleDate: parsedDate,
             quantity: parseInt(quantityField) || 1,
             price: parseFloat(priceField) || 0,
             commission: parseFloat(commissionField) || 0,
         };
+    }
+    parseAndValidateDate(dateField) {
+        if (!dateField) {
+            return null;
+        }
+        const dateString = String(dateField).trim();
+        if (dateString.length > 50 ||
+            dateString.includes('Видеокарта') ||
+            dateString.includes('Фен') ||
+            dateString.includes('Книга') ||
+            dateString.includes('Кофеварка') ||
+            dateString.includes('Пылесос') ||
+            dateString.includes('Электрочайник') ||
+            dateString.includes('Куртка') ||
+            dateString.includes('Косметический') ||
+            dateString.includes('Игровая') ||
+            dateString.includes('Колонка') ||
+            dateString.includes('Увлажнитель') ||
+            dateString.includes('Рюкзак') ||
+            dateString.includes('Наушники') ||
+            dateString.includes('Часы') ||
+            dateString.includes('Термос') ||
+            dateString.includes('Смартфон') ||
+            dateString.includes('Планшет') ||
+            dateString.includes('Набор') ||
+            dateString.includes('Кроссовки') ||
+            dateString.includes('Матрас')) {
+            return null;
+        }
+        let parsedDate;
+        if (dateString.includes('.')) {
+            const parts = dateString.split('.');
+            if (parts.length === 3) {
+                const day = parseInt(parts[0]);
+                const month = parseInt(parts[1]);
+                const year = parseInt(parts[2]);
+                if (day < 1 || day > 31 || month < 1 || month > 12) {
+                    return null;
+                }
+                parsedDate = new Date(year, month - 1, day);
+                if (parsedDate.getDate() !== day || parsedDate.getMonth() !== month - 1 || parsedDate.getFullYear() !== year) {
+                    return null;
+                }
+            }
+            else {
+                parsedDate = new Date(dateString);
+            }
+        }
+        else if (dateString.includes('-')) {
+            parsedDate = new Date(dateString);
+        }
+        else if (dateString.includes('/')) {
+            parsedDate = new Date(dateString);
+        }
+        else {
+            parsedDate = new Date(dateString);
+        }
+        if (isNaN(parsedDate.getTime())) {
+            return null;
+        }
+        const currentYear = new Date().getFullYear();
+        const dateYear = parsedDate.getFullYear();
+        if (dateYear < 2020 || dateYear > currentYear + 1) {
+            return null;
+        }
+        return parsedDate;
     }
 };
 exports.FileParsingProcessor = FileParsingProcessor;

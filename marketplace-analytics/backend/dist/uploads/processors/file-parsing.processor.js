@@ -47,16 +47,23 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             const validSalesData = salesData
                 .filter((result) => result.status === 'fulfilled' && result.value !== null)
                 .map(result => result.value);
-            await this.prisma.$transaction(async (tx) => {
-                if (validSalesData.length === 0) {
-                    throw new Error('No valid sales data found after processing. Please check your file format.');
+            const finalValidatedData = validSalesData.filter(item => {
+                if (!item.saleDate || isNaN(item.saleDate.getTime())) {
+                    this.logger.warn(`Filtering out item with invalid date - SKU: ${item.sku}, Date: ${item.saleDate}`);
+                    return false;
                 }
-                this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${parsedData.length} total parsed records`);
+                return true;
+            });
+            await this.prisma.$transaction(async (tx) => {
+                if (finalValidatedData.length === 0) {
+                    throw new Error('No valid sales data found after processing and validation. Please check your file format and date fields.');
+                }
+                this.logger.log(`Processing ${finalValidatedData.length} valid sales records out of ${parsedData.length} total parsed records`);
                 await tx.salesData.createMany({
-                    data: validSalesData,
+                    data: finalValidatedData,
                 });
-                const totalRevenue = validSalesData.reduce((sum, item) => sum + item.revenue, 0);
-                const totalProfit = validSalesData.reduce((sum, item) => sum + item.netProfit, 0);
+                const totalRevenue = finalValidatedData.reduce((sum, item) => sum + item.revenue, 0);
+                const totalProfit = finalValidatedData.reduce((sum, item) => sum + item.netProfit, 0);
                 const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
                 await tx.report.update({
                     where: { id: reportId },
@@ -96,10 +103,31 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
     }
     async parseCsvFile(filePath, marketplace) {
         const fileContent = fs.readFileSync(filePath, 'utf8');
-        const cleanedContent = fileContent
+        let cleanedContent = fileContent
             .replace(/\0/g, '')
             .replace(/\r\n/g, '\n')
             .replace(/\r/g, '\n');
+        const lines = cleanedContent.split('\n');
+        const cleanedLines = lines.map((line, index) => {
+            if (index === 0)
+                return line;
+            if (line.includes('Книга') || line.includes('Видеокарта') || line.includes('Фен') ||
+                line.includes('Кофеварка') || line.includes('Пылесос') || line.includes('Электрочайник')) {
+                const dateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
+                if (dateMatch) {
+                    const dateStr = dateMatch[1];
+                    const dateIndex = line.indexOf(dateStr);
+                    const afterDate = line.substring(dateIndex);
+                    const parts = afterDate.split(',');
+                    if (parts.length >= 7) {
+                        return afterDate;
+                    }
+                }
+                return '';
+            }
+            return line;
+        }).filter(line => line.trim() !== '');
+        cleanedContent = cleanedLines.join('\n');
         const parsed = Papa.parse(cleanedContent, {
             header: true,
             skipEmptyLines: true,
@@ -111,7 +139,29 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (parsed.errors && parsed.errors.length > 0) {
             this.logger.warn(`CSV parsing errors found:`, parsed.errors.slice(0, 5));
         }
-        return this.mapRowsToSalesData(parsed.data, marketplace);
+        const validRows = parsed.data.filter((row) => {
+            const dateField = row['Дата'] || row['Date'] || row['date'];
+            const skuField = row['Артикул'] || row['SKU'] || row['sku'];
+            if (dateField && typeof dateField === 'string') {
+                const dateStr = dateField.toString();
+                if (dateStr.includes('Книга') || dateStr.includes('Видеокарта') ||
+                    dateStr.includes('Фен') || dateStr.includes('Кофеварка') ||
+                    dateStr.includes('Пылесос') || dateStr.includes('Электрочайник') ||
+                    dateStr.length > 50) {
+                    return false;
+                }
+            }
+            if (skuField && typeof skuField === 'string') {
+                const skuStr = skuField.toString();
+                if (skuStr.length > 50 || skuStr.includes('Видеокарта') ||
+                    skuStr.includes('Фен') || skuStr.includes('Книга')) {
+                    return false;
+                }
+            }
+            return true;
+        });
+        this.logger.log(`Filtered ${parsed.data.length - validRows.length} corrupted rows, processing ${validRows.length} valid rows`);
+        return this.mapRowsToSalesData(validRows, marketplace);
     }
     async parseExcelFile(filePath, marketplace) {
         const workbook = XLSX.readFile(filePath);
@@ -151,11 +201,6 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
             return null;
         }
-        const parsedDate = this.parseAndValidateDate(dateField);
-        if (!parsedDate) {
-            this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
-            return null;
-        }
         const quantity = parseInt(quantityField);
         const price = parseFloat(priceField);
         if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
@@ -164,6 +209,15 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         }
         if (isNaN(price) || price < 0 || price > 1000000) {
             this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+            return null;
+        }
+        const parsedDate = this.parseAndValidateDate(dateField);
+        if (!parsedDate) {
+            this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
+            return null;
+        }
+        if (isNaN(parsedDate.getTime())) {
+            this.logger.warn(`Parsed date is NaN for SKU ${skuField}: "${dateField}" -> ${parsedDate}`);
             return null;
         }
         return {
@@ -193,11 +247,6 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
             return null;
         }
-        const parsedDate = this.parseAndValidateDate(dateField);
-        if (!parsedDate) {
-            this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
-            return null;
-        }
         const quantity = parseInt(quantityField);
         const price = parseFloat(priceField);
         if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
@@ -206,6 +255,15 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         }
         if (isNaN(price) || price < 0 || price > 1000000) {
             this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+            return null;
+        }
+        const parsedDate = this.parseAndValidateDate(dateField);
+        if (!parsedDate) {
+            this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
+            return null;
+        }
+        if (isNaN(parsedDate.getTime())) {
+            this.logger.warn(`Parsed date is NaN for SKU ${skuField}: "${dateField}" -> ${parsedDate}`);
             return null;
         }
         return {
@@ -221,9 +279,15 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (!dateField) {
             return null;
         }
-        const dateString = String(dateField).trim();
-        if (dateString.length > 50 ||
-            /[а-яё]/i.test(dateString) ||
+        let dateString = String(dateField).trim();
+        if (dateString.length > 20 || /[а-яё]/i.test(dateString)) {
+            this.logger.debug(`Processing suspicious date field: "${dateString}"`);
+        }
+        if (!/\d/.test(dateString) || dateString.length < 8 || dateString.length > 50) {
+            this.logger.warn(`Date field too short or too long: "${dateString}"`);
+            return null;
+        }
+        if (/[а-яё]/i.test(dateString) ||
             dateString.includes('"') ||
             dateString.includes('\n') ||
             /\d{10,}/.test(dateString) ||
@@ -247,26 +311,60 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             dateString.includes('Планшет') ||
             dateString.includes('Набор') ||
             dateString.includes('Кроссовки') ||
-            dateString.includes('Матрас')) {
+            dateString.includes('Матрас') ||
+            dateString.includes('Apple') ||
+            dateString.includes('Nike') ||
+            dateString.includes('Samsung') ||
+            dateString.includes('Dyson') ||
+            dateString.includes('JBL') ||
+            dateString.includes('Logitech') ||
+            dateString.includes('Stanley') ||
+            dateString.includes('Tefal') ||
+            dateString.includes('Philips') ||
+            dateString.includes('iPad') ||
+            dateString.includes('iPhone') ||
+            dateString.includes('AirPods') ||
+            dateString.includes('Galaxy') ||
+            dateString.includes('Watch') ||
+            dateString.includes('RTX') ||
+            dateString.includes('HD7447')) {
             return null;
+        }
+        const dateMatch = dateString.match(/^(\d{1,2}\.\d{1,2}\.\d{4})/);
+        if (dateMatch) {
+            dateString = dateMatch[1];
+        }
+        else {
+            const altDateMatch = dateString.match(/^(\d{4}-\d{1,2}-\d{1,2})/);
+            if (altDateMatch) {
+                dateString = altDateMatch[1];
+            }
         }
         let parsedDate;
         if (dateString.includes('.')) {
             const parts = dateString.split('.');
             if (parts.length === 3) {
-                const day = parseInt(parts[0]);
-                const month = parseInt(parts[1]);
-                const year = parseInt(parts[2]);
-                if (day < 1 || day > 31 || month < 1 || month > 12) {
+                const day = parseInt(parts[0].trim());
+                const month = parseInt(parts[1].trim());
+                const year = parseInt(parts[2].trim());
+                if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                    day < 1 || day > 31 ||
+                    month < 1 || month > 12 ||
+                    year < 1900 || year > 2100) {
+                    this.logger.warn(`Invalid date components: day=${day}, month=${month}, year=${year} from "${dateString}"`);
                     return null;
                 }
                 parsedDate = new Date(year, month - 1, day);
-                if (parsedDate.getDate() !== day || parsedDate.getMonth() !== month - 1 || parsedDate.getFullYear() !== year) {
+                if (parsedDate.getDate() !== day ||
+                    parsedDate.getMonth() !== month - 1 ||
+                    parsedDate.getFullYear() !== year) {
+                    this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${parsedDate.getDate()}/${parsedDate.getMonth() + 1}/${parsedDate.getFullYear()}`);
                     return null;
                 }
             }
             else {
-                parsedDate = new Date(dateString);
+                this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
+                return null;
             }
         }
         else if (dateString.includes('-')) {
@@ -275,18 +373,77 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         else if (dateString.includes('/')) {
             parsedDate = new Date(dateString);
         }
+        else if (/^\d{1,2}\s+\d{1,2}\s+\d{4}$/.test(dateString)) {
+            const parts = dateString.split(/\s+/);
+            if (parts.length === 3) {
+                const day = parseInt(parts[0]);
+                const month = parseInt(parts[1]);
+                const year = parseInt(parts[2]);
+                if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > 2100) {
+                    return null;
+                }
+                parsedDate = new Date(year, month - 1, day);
+                if (parsedDate.getDate() !== day ||
+                    parsedDate.getMonth() !== month - 1 ||
+                    parsedDate.getFullYear() !== year) {
+                    return null;
+                }
+            }
+            else {
+                return null;
+            }
+        }
         else {
-            parsedDate = new Date(dateString);
+            if (/^\d{4}-\d{2}-\d{2}/.test(dateString) ||
+                /^\d{1,2}\/\d{1,2}\/\d{4}/.test(dateString)) {
+                parsedDate = new Date(dateString);
+            }
+            else {
+                return null;
+            }
         }
         if (isNaN(parsedDate.getTime())) {
+            this.logger.warn(`Final date validation failed for "${dateString}": parsedDate.getTime() is NaN`);
             return null;
         }
         const currentYear = new Date().getFullYear();
         const dateYear = parsedDate.getFullYear();
         if (dateYear < 2020 || dateYear > currentYear + 1) {
+            this.logger.warn(`Date year out of range for "${dateString}": ${dateYear} (expected 2020-${currentYear + 1})`);
             return null;
         }
+        this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
         return parsedDate;
+    }
+    parseDate(dateString) {
+        if (!dateString || typeof dateString !== 'string') {
+            return null;
+        }
+        const cleanDateString = dateString.trim();
+        const dateParts = cleanDateString.split('.');
+        if (dateParts.length === 3) {
+            const day = parseInt(dateParts[0]);
+            const month = parseInt(dateParts[1]);
+            const year = parseInt(dateParts[2]);
+            if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                day < 1 || day > 31 ||
+                month < 1 || month > 12 ||
+                year < 2020 || year > 2030) {
+                return null;
+            }
+            const date = new Date(year, month - 1, day);
+            if (date.getDate() !== day ||
+                date.getMonth() !== month - 1 ||
+                date.getFullYear() !== year) {
+                return null;
+            }
+            return date;
+        }
+        const parsed = new Date(cleanDateString);
+        if (isNaN(parsed.getTime())) {
+            return null;
+        }
+        return parsed;
     }
 };
 exports.FileParsingProcessor = FileParsingProcessor;

@@ -20,5 +20,6 @@ export declare class FileParsingProcessor {
     private mapWildberriesRow;
     private mapOzonRow;
     private parseAndValidateDate;
+    private parseDate;
 }
 export {};

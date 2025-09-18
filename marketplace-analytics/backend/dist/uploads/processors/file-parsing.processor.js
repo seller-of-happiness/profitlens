@@ -371,7 +371,27 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             parsedDate = new Date(dateString);
         }
         else if (dateString.includes('/')) {
-            parsedDate = new Date(dateString);
+            const parts = dateString.split('/');
+            if (parts.length === 3) {
+                const month = parseInt(parts[0]);
+                const day = parseInt(parts[1]);
+                const year = parseInt(parts[2]);
+                if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                    day < 1 || day > 31 ||
+                    month < 1 || month > 12 ||
+                    year < 1900 || year > 2100) {
+                    return null;
+                }
+                parsedDate = new Date(year, month - 1, day);
+                if (parsedDate.getDate() !== day ||
+                    parsedDate.getMonth() !== month - 1 ||
+                    parsedDate.getFullYear() !== year) {
+                    return null;
+                }
+            }
+            else {
+                return null;
+            }
         }
         else if (/^\d{1,2}\s+\d{1,2}\s+\d{4}$/.test(dateString)) {
             const parts = dateString.split(/\s+/);
@@ -394,12 +414,31 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             }
         }
         else {
-            if (/^\d{4}-\d{2}-\d{2}/.test(dateString) ||
-                /^\d{1,2}\/\d{1,2}\/\d{4}/.test(dateString)) {
+            if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) {
                 parsedDate = new Date(dateString);
             }
             else {
-                return null;
+                const dotParts = dateString.split('.');
+                if (dotParts.length === 3) {
+                    const day = parseInt(dotParts[0]);
+                    const month = parseInt(dotParts[1]);
+                    const year = parseInt(dotParts[2]);
+                    if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                        day < 1 || day > 31 ||
+                        month < 1 || month > 12 ||
+                        year < 1900 || year > 2100) {
+                        return null;
+                    }
+                    parsedDate = new Date(year, month - 1, day);
+                    if (parsedDate.getDate() !== day ||
+                        parsedDate.getMonth() !== month - 1 ||
+                        parsedDate.getFullYear() !== year) {
+                        return null;
+                    }
+                }
+                else {
+                    return null;
+                }
             }
         }
         if (isNaN(parsedDate.getTime())) {

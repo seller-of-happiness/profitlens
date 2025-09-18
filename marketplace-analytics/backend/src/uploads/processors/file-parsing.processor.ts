@@ -146,30 +146,60 @@ export class FileParsingProcessor {
       // Skip header line
       if (index === 0) return line;
       
-      // Check for obviously corrupted lines (lines that contain product names in date position)
-      // If a line starts with a product name instead of a date, try to extract valid data
-      if (line.includes('Книга') || line.includes('Видеокарта') || line.includes('Фен') ||
-          line.includes('Кофеварка') || line.includes('Пылесос') || line.includes('Электрочайник')) {
-        
-        // Try to find a date pattern in the line and reconstruct
+      // Skip empty lines
+      if (!line.trim()) return '';
+      
+      // CRITICAL FIX: More aggressive cleaning for corrupted lines
+      // Check if line starts with a valid date pattern (DD.MM.YYYY)
+      const startsWithDate = /^\d{1,2}\.\d{1,2}\.\d{4}/.test(line.trim());
+      
+      if (!startsWithDate) {
+        // Line doesn't start with a date - it's likely corrupted
+        // Try to find a date pattern anywhere in the line and extract valid data from there
         const dateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
         if (dateMatch) {
           const dateStr = dateMatch[1];
           const dateIndex = line.indexOf(dateStr);
           
-          // Try to extract the part after the date as the actual data
-          const afterDate = line.substring(dateIndex);
-          const parts = afterDate.split(',');
+          // Extract everything from the date onwards
+          let reconstructedLine = line.substring(dateIndex);
           
-          // If we have enough parts after the date, reconstruct the line
+          // Clean up the reconstructed line - remove any leading commas or quotes
+          reconstructedLine = reconstructedLine.replace(/^[,"\s]+/, '');
+          
+          // Check if we have a reasonable number of fields after cleaning
+          const parts = reconstructedLine.split(',');
           if (parts.length >= 7) {
-            // Format: Date,SKU,Product Name,Price,Quantity,Revenue,Commission,Net Profit
-            return afterDate;
+            this.logger.debug(`Reconstructed corrupted line: "${line.substring(0, 100)}..." -> "${reconstructedLine.substring(0, 100)}..."`);
+            return reconstructedLine;
           }
         }
         
-        // If we can't reconstruct, mark line for skipping by making it obviously invalid
+        // If we can't reconstruct, skip this line
+        this.logger.warn(`Skipping corrupted line that doesn't start with date: "${line.substring(0, 100)}..."`);
         return '';
+      }
+      
+      // Additional check for lines that have product names mixed into other fields
+      // Split by comma and check if any field contains suspicious content
+      const parts = line.split(',');
+      if (parts.length >= 3) {
+        // Check if SKU field (second field) looks suspicious
+        const skuField = parts[1];
+        if (skuField && (skuField.includes('Книга') || skuField.includes('Видеокарта') || 
+            skuField.includes('Фен') || skuField.includes('Кофеварка') || 
+            skuField.includes('Пылесос') || skuField.includes('Электрочайник') ||
+            skuField.length > 50)) {
+          this.logger.warn(`Skipping line with corrupted SKU field: "${line.substring(0, 100)}..."`);
+          return '';
+        }
+        
+        // Check if product name field (third field) is reasonable
+        const nameField = parts[2];
+        if (nameField && (nameField.length > 200 || nameField.includes('\n'))) {
+          this.logger.warn(`Skipping line with corrupted name field: "${line.substring(0, 100)}..."`);
+          return '';
+        }
       }
       
       return line;
@@ -451,10 +481,10 @@ export class FileParsingProcessor {
       }
     }
 
-    // Try to parse the date
+    // CRITICAL FIX: Always parse DD.MM.YYYY format explicitly to avoid MM/DD/YYYY confusion
     let parsedDate: Date;
     
-    // Handle different date formats
+    // Handle different date formats - prioritize DD.MM.YYYY format
     if (dateString.includes('.')) {
       // DD.MM.YYYY format (most common for Russian CSV files)
       const parts = dateString.split('.');
@@ -472,8 +502,9 @@ export class FileParsingProcessor {
           return null;
         }
         
-        // Create date with explicit validation - use UTC to avoid timezone issues
-        parsedDate = new Date(Date.UTC(year, month - 1, day)); // Month is 0-indexed
+        // CRITICAL: Create date with explicit validation - use UTC to avoid timezone issues
+        // Month is 0-indexed in JavaScript Date constructor
+        parsedDate = new Date(Date.UTC(year, month - 1, day));
         
         // Additional validation: check if the created date components match input
         // Use UTC methods to avoid timezone confusion
@@ -487,21 +518,55 @@ export class FileParsingProcessor {
         }
         
         this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
+        
+        // Validate the parsed date immediately
+        if (isNaN(parsedDate.getTime())) {
+          this.logger.warn(`Date creation failed for "${dateString}": parsedDate.getTime() is NaN`);
+          return null;
+        }
+        
+        return parsedDate; // Return immediately to avoid further processing
       } else {
         // Fallback for malformed dot-separated dates
         this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
         return null;
       }
-    } else if (dateString.includes('-')) {
-      // YYYY-MM-DD format or similar
-      parsedDate = new Date(dateString);
+    } else if (dateString.includes('-') && /^\d{4}-\d{1,2}-\d{1,2}/.test(dateString)) {
+      // YYYY-MM-DD format - parse explicitly to avoid confusion
+      const parts = dateString.split('-');
+      if (parts.length === 3) {
+        const year = parseInt(parts[0]);
+        const month = parseInt(parts[1]);
+        const day = parseInt(parts[2]);
+        
+        if (isNaN(day) || isNaN(month) || isNaN(year) ||
+            day < 1 || day > 31 || 
+            month < 1 || month > 12 ||
+            year < 1900 || year > 2100) {
+          return null;
+        }
+        
+        // Use UTC to avoid timezone issues
+        parsedDate = new Date(Date.UTC(year, month - 1, day));
+        
+        // Validate using UTC methods
+        const createdDay = parsedDate.getUTCDate();
+        const createdMonth = parsedDate.getUTCMonth() + 1;
+        const createdYear = parsedDate.getUTCFullYear();
+        
+        if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+          return null;
+        }
+      } else {
+        return null;
+      }
     } else if (dateString.includes('/')) {
-      // Handle MM/DD/YYYY format with explicit parsing to avoid ambiguity
+      // Handle DD/MM/YYYY format (assume DD/MM/YYYY for European format, not MM/DD/YYYY)
       const parts = dateString.split('/');
       if (parts.length === 3) {
-        // Assume MM/DD/YYYY format for slash-separated dates
-        const month = parseInt(parts[0]);
-        const day = parseInt(parts[1]);
+        // Assume DD/MM/YYYY format for slash-separated dates in European context
+        const day = parseInt(parts[0]);
+        const month = parseInt(parts[1]);
         const year = parseInt(parts[2]);
         
         if (isNaN(day) || isNaN(month) || isNaN(year) ||
@@ -526,7 +591,7 @@ export class FileParsingProcessor {
         return null;
       }
     } else if (/^\d{1,2}\s+\d{1,2}\s+\d{4}$/.test(dateString)) {
-      // Handle space-separated dates like "17 09 2025"
+      // Handle space-separated dates like "17 09 2025" - assume DD MM YYYY
       const parts = dateString.split(/\s+/);
       if (parts.length === 3) {
         const day = parseInt(parts[0]);
@@ -552,39 +617,34 @@ export class FileParsingProcessor {
         return null;
       }
     } else {
-      // Try parsing as-is only for ISO date format
-      if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) {
-        parsedDate = new Date(dateString);
-      } else {
-        // For any other format, including DD.MM.YYYY that might have been missed,
-        // try to parse it as DD.MM.YYYY one more time
-        const dotParts = dateString.split('.');
-        if (dotParts.length === 3) {
-          const day = parseInt(dotParts[0]);
-          const month = parseInt(dotParts[1]);
-          const year = parseInt(dotParts[2]);
-          
-          if (isNaN(day) || isNaN(month) || isNaN(year) ||
-              day < 1 || day > 31 || 
-              month < 1 || month > 12 ||
-              year < 1900 || year > 2100) {
-            return null;
-          }
-          
-          // Use UTC to avoid timezone issues
-          parsedDate = new Date(Date.UTC(year, month - 1, day));
-          
-          // Validate using UTC methods
-          const createdDay = parsedDate.getUTCDate();
-          const createdMonth = parsedDate.getUTCMonth() + 1;
-          const createdYear = parsedDate.getUTCFullYear();
-          
-          if (createdDay !== day || createdMonth !== month || createdYear !== year) {
-            return null;
-          }
-        } else {
+      // For any unrecognized format, try one more time to parse as DD.MM.YYYY
+      const dotParts = dateString.split('.');
+      if (dotParts.length === 3) {
+        const day = parseInt(dotParts[0]);
+        const month = parseInt(dotParts[1]);
+        const year = parseInt(dotParts[2]);
+        
+        if (isNaN(day) || isNaN(month) || isNaN(year) ||
+            day < 1 || day > 31 || 
+            month < 1 || month > 12 ||
+            year < 1900 || year > 2100) {
           return null;
         }
+        
+        // Use UTC to avoid timezone issues
+        parsedDate = new Date(Date.UTC(year, month - 1, day));
+        
+        // Validate using UTC methods
+        const createdDay = parsedDate.getUTCDate();
+        const createdMonth = parsedDate.getUTCMonth() + 1;
+        const createdYear = parsedDate.getUTCFullYear();
+        
+        if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+          return null;
+        }
+      } else {
+        this.logger.warn(`Unrecognized date format: "${dateString}"`);
+        return null;
       }
     }
 

@@ -36,6 +36,12 @@ let UploadsController = class UploadsController {
     async deleteReport(id, req) {
         return this.uploadsService.deleteReport(id, req.user.id);
     }
+    async deleteAllReports(req) {
+        return this.uploadsService.deleteAllReports(req.user.id);
+    }
+    async replaceReport(id, file, marketplace, req) {
+        return this.uploadsService.replaceReport(id, file, req.user.id, marketplace);
+    }
 };
 exports.UploadsController = UploadsController;
 __decorate([
@@ -87,6 +93,34 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], UploadsController.prototype, "deleteReport", null);
+__decorate([
+    (0, common_1.Delete)(),
+    (0, swagger_1.ApiOperation)({ summary: 'Удалить все отчеты пользователя' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Все отчеты удалены' }),
+    __param(0, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], UploadsController.prototype, "deleteAllReports", null);
+__decorate([
+    (0, common_1.Post)(':id/replace'),
+    (0, common_1.UseInterceptors)((0, platform_express_1.FileInterceptor)('file')),
+    (0, swagger_1.ApiOperation)({ summary: 'Заменить отчет новым файлом' }),
+    (0, swagger_1.ApiConsumes)('multipart/form-data'),
+    (0, swagger_1.ApiBody)({
+        description: 'Новый файл с данными продаж',
+        type: upload_file_dto_1.UploadFileDto,
+    }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Отчет успешно заменен' }),
+    (0, swagger_1.ApiResponse)({ status: 404, description: 'Отчет не найден' }),
+    __param(0, (0, common_1.Param)('id')),
+    __param(1, (0, common_1.UploadedFile)()),
+    __param(2, (0, common_1.Body)('marketplace')),
+    __param(3, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [String, Object, String, Object]),
+    __metadata("design:returntype", Promise)
+], UploadsController.prototype, "replaceReport", null);
 exports.UploadsController = UploadsController = __decorate([
     (0, swagger_1.ApiTags)('Uploads'),
     (0, common_1.Controller)('uploads'),

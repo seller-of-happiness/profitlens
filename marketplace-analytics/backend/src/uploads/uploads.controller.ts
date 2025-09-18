@@ -65,4 +65,30 @@ export class UploadsController {
   async deleteReport(@Param('id') id: string, @Request() req) {
     return this.uploadsService.deleteReport(id, req.user.id);
   }
+
+  @Delete()
+  @ApiOperation({ summary: 'Удалить все отчеты пользователя' })
+  @ApiResponse({ status: 200, description: 'Все отчеты удалены' })
+  async deleteAllReports(@Request() req) {
+    return this.uploadsService.deleteAllReports(req.user.id);
+  }
+
+  @Post(':id/replace')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: 'Заменить отчет новым файлом' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    description: 'Новый файл с данными продаж',
+    type: UploadFileDto,
+  })
+  @ApiResponse({ status: 200, description: 'Отчет успешно заменен' })
+  @ApiResponse({ status: 404, description: 'Отчет не найден' })
+  async replaceReport(
+    @Param('id') id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @Body('marketplace') marketplace: Marketplace,
+    @Request() req,
+  ) {
+    return this.uploadsService.replaceReport(id, file, req.user.id, marketplace);
+  }
 }

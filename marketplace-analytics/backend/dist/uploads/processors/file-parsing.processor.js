@@ -107,6 +107,7 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             .replace(/\0/g, '')
             .replace(/\r\n/g, '\n')
             .replace(/\r/g, '\n');
+        cleanedContent = this.preprocessCSVQuotes(cleanedContent);
         const lines = cleanedContent.split('\n');
         const cleanedLines = lines.map((line, index) => {
             if (index === 0)
@@ -500,6 +501,55 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             return null;
         }
         return parsedDate;
+    }
+    preprocessCSVQuotes(csvContent) {
+        const lines = csvContent.split('\n');
+        const processedLines = lines.map((line, index) => {
+            if (index === 0)
+                return line;
+            if (!line.trim())
+                return line;
+            let processedLine = line;
+            const quotedFieldPattern = /,"([^"]*"[^"]*"[^"]*)",/g;
+            let match;
+            while ((match = quotedFieldPattern.exec(line)) !== null) {
+                const originalField = match[0];
+                const fieldContent = match[1];
+                const escapedContent = fieldContent.replace(/"/g, '""');
+                const newField = `,"${escapedContent}",`;
+                processedLine = processedLine.replace(originalField, newField);
+            }
+            const beginningQuotedFieldPattern = /^"([^"]*"[^"]*"[^"]*)",/;
+            const beginningMatch = beginningQuotedFieldPattern.exec(processedLine);
+            if (beginningMatch) {
+                const originalField = beginningMatch[0];
+                const fieldContent = beginningMatch[1];
+                const escapedContent = fieldContent.replace(/"/g, '""');
+                const newField = `"${escapedContent}",`;
+                processedLine = processedLine.replace(originalField, newField);
+            }
+            const endQuotedFieldPattern = /,"([^"]*"[^"]*"[^"]*)"$/;
+            const endMatch = endQuotedFieldPattern.exec(processedLine);
+            if (endMatch) {
+                const originalField = endMatch[0];
+                const fieldContent = endMatch[1];
+                const escapedContent = fieldContent.replace(/"/g, '""');
+                const newField = `,"${escapedContent}"`;
+                processedLine = processedLine.replace(originalField, newField);
+            }
+            const singleQuotedFieldPattern = /^"([^"]*"[^"]*"[^"]*)"$/;
+            const singleMatch = singleQuotedFieldPattern.exec(processedLine);
+            if (singleMatch) {
+                const fieldContent = singleMatch[1];
+                const escapedContent = fieldContent.replace(/"/g, '""');
+                processedLine = `"${escapedContent}"`;
+            }
+            if (processedLine !== line) {
+                this.logger.debug(`Fixed quotes in line: "${line.substring(0, 50)}..." -> "${processedLine.substring(0, 50)}..."`);
+            }
+            return processedLine;
+        });
+        return processedLines.join('\n');
     }
     parseDate(dateString) {
         if (!dateString || typeof dateString !== 'string') {

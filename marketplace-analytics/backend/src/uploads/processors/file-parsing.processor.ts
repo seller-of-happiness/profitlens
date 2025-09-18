@@ -193,14 +193,7 @@ export class FileParsingProcessor {
       return null;
     }
 
-    // Validate and parse date
-    const parsedDate = this.parseAndValidateDate(dateField);
-    if (!parsedDate) {
-      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
-      return null;
-    }
-
-    // Validate numeric fields
+    // Validate numeric fields first
     const quantity = parseInt(quantityField);
     const price = parseFloat(priceField);
     
@@ -211,6 +204,13 @@ export class FileParsingProcessor {
     
     if (isNaN(price) || price < 0 || price > 1000000) {
       this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+      return null;
+    }
+
+    // Validate and parse date - this must be the last validation step
+    const parsedDate = this.parseAndValidateDate(dateField);
+    if (!parsedDate) {
+      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
       return null;
     }
 
@@ -248,14 +248,7 @@ export class FileParsingProcessor {
       return null;
     }
 
-    // Validate and parse date
-    const parsedDate = this.parseAndValidateDate(dateField);
-    if (!parsedDate) {
-      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
-      return null;
-    }
-
-    // Validate numeric fields
+    // Validate numeric fields first
     const quantity = parseInt(quantityField);
     const price = parseFloat(priceField);
     
@@ -266,6 +259,13 @@ export class FileParsingProcessor {
     
     if (isNaN(price) || price < 0 || price > 1000000) {
       this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+      return null;
+    }
+
+    // Validate and parse date - this must be the last validation step
+    const parsedDate = this.parseAndValidateDate(dateField);
+    if (!parsedDate) {
+      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
       return null;
     }
 
@@ -327,26 +327,32 @@ export class FileParsingProcessor {
     
     // Handle different date formats
     if (dateString.includes('.')) {
-      // DD.MM.YYYY format
+      // DD.MM.YYYY format (most common for Russian CSV files)
       const parts = dateString.split('.');
       if (parts.length === 3) {
-        const day = parseInt(parts[0]);
-        const month = parseInt(parts[1]);
-        const year = parseInt(parts[2]);
+        const day = parseInt(parts[0].trim());
+        const month = parseInt(parts[1].trim());
+        const year = parseInt(parts[2].trim());
         
-        // Validate day and month ranges
-        if (day < 1 || day > 31 || month < 1 || month > 12) {
+        // Validate day, month and year ranges
+        if (isNaN(day) || isNaN(month) || isNaN(year) ||
+            day < 1 || day > 31 || 
+            month < 1 || month > 12 ||
+            year < 1900 || year > 2100) {
           return null;
         }
         
         parsedDate = new Date(year, month - 1, day); // Month is 0-indexed
         
         // Check if the date rolled over (e.g., 32.01.2025 becomes 01.02.2025)
-        if (parsedDate.getDate() !== day || parsedDate.getMonth() !== month - 1 || parsedDate.getFullYear() !== year) {
+        if (parsedDate.getDate() !== day || 
+            parsedDate.getMonth() !== month - 1 || 
+            parsedDate.getFullYear() !== year) {
           return null;
         }
       } else {
-        parsedDate = new Date(dateString);
+        // Fallback for malformed dot-separated dates
+        return null;
       }
     } else if (dateString.includes('-')) {
       // YYYY-MM-DD format or similar
@@ -354,9 +360,36 @@ export class FileParsingProcessor {
     } else if (dateString.includes('/')) {
       // MM/DD/YYYY or DD/MM/YYYY format
       parsedDate = new Date(dateString);
+    } else if (/^\d{1,2}\s+\d{1,2}\s+\d{4}$/.test(dateString)) {
+      // Handle space-separated dates like "17 09 2025"
+      const parts = dateString.split(/\s+/);
+      if (parts.length === 3) {
+        const day = parseInt(parts[0]);
+        const month = parseInt(parts[1]);
+        const year = parseInt(parts[2]);
+        
+        if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > 2100) {
+          return null;
+        }
+        
+        parsedDate = new Date(year, month - 1, day);
+        
+        if (parsedDate.getDate() !== day || 
+            parsedDate.getMonth() !== month - 1 || 
+            parsedDate.getFullYear() !== year) {
+          return null;
+        }
+      } else {
+        return null;
+      }
     } else {
-      // Try parsing as-is
-      parsedDate = new Date(dateString);
+      // Try parsing as-is only if it looks like a valid date format
+      if (/^\d{4}-\d{2}-\d{2}/.test(dateString) || 
+          /^\d{1,2}\/\d{1,2}\/\d{4}/.test(dateString)) {
+        parsedDate = new Date(dateString);
+      } else {
+        return null;
+      }
     }
 
     // Validate the parsed date

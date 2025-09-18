@@ -126,10 +126,47 @@ export class FileParsingProcessor {
     const fileContent = fs.readFileSync(filePath, 'utf8');
     
     // Clean up the file content to handle potential encoding issues
-    const cleanedContent = fileContent
+    let cleanedContent = fileContent
       .replace(/\0/g, '') // Remove null bytes
       .replace(/\r\n/g, '\n') // Normalize line endings
       .replace(/\r/g, '\n'); // Handle old Mac line endings
+    
+    // Split into lines and clean up each line
+    const lines = cleanedContent.split('\n');
+    const cleanedLines = lines.map((line, index) => {
+      // Skip header line
+      if (index === 0) return line;
+      
+      // Check for obviously corrupted lines (lines that contain product names in date position)
+      // If a line starts with a product name instead of a date, try to extract valid data
+      if (line.includes('Книга') || line.includes('Видеокарта') || line.includes('Фен') ||
+          line.includes('Кофеварка') || line.includes('Пылесос') || line.includes('Электрочайник')) {
+        
+        // Try to find a date pattern in the line and reconstruct
+        const dateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
+        if (dateMatch) {
+          const dateStr = dateMatch[1];
+          const dateIndex = line.indexOf(dateStr);
+          
+          // Try to extract the part after the date as the actual data
+          const afterDate = line.substring(dateIndex);
+          const parts = afterDate.split(',');
+          
+          // If we have enough parts after the date, reconstruct the line
+          if (parts.length >= 7) {
+            // Format: Date,SKU,Product Name,Price,Quantity,Revenue,Commission,Net Profit
+            return afterDate;
+          }
+        }
+        
+        // If we can't reconstruct, mark line for skipping by making it obviously invalid
+        return '';
+      }
+      
+      return line;
+    }).filter(line => line.trim() !== ''); // Remove empty lines
+    
+    cleanedContent = cleanedLines.join('\n');
     
     const parsed = Papa.parse(cleanedContent, {
       header: true,
@@ -145,7 +182,38 @@ export class FileParsingProcessor {
       this.logger.warn(`CSV parsing errors found:`, parsed.errors.slice(0, 5)); // Log first 5 errors
     }
 
-    return this.mapRowsToSalesData(parsed.data, marketplace);
+    // Filter out rows that still look corrupted
+    const validRows = parsed.data.filter((row: any) => {
+      // Check if the row has the basic required fields
+      const dateField = row['Дата'] || row['Date'] || row['date'];
+      const skuField = row['Артикул'] || row['SKU'] || row['sku'];
+      
+      // Skip rows where date field contains product names
+      if (dateField && typeof dateField === 'string') {
+        const dateStr = dateField.toString();
+        if (dateStr.includes('Книга') || dateStr.includes('Видеокарта') || 
+            dateStr.includes('Фен') || dateStr.includes('Кофеварка') ||
+            dateStr.includes('Пылесос') || dateStr.includes('Электрочайник') ||
+            dateStr.length > 50) {
+          return false;
+        }
+      }
+      
+      // Skip rows where SKU field is obviously wrong (too long or contains product names)
+      if (skuField && typeof skuField === 'string') {
+        const skuStr = skuField.toString();
+        if (skuStr.length > 50 || skuStr.includes('Видеокарта') ||
+            skuStr.includes('Фен') || skuStr.includes('Книга')) {
+          return false;
+        }
+      }
+      
+      return true;
+    });
+
+    this.logger.log(`Filtered ${parsed.data.length - validRows.length} corrupted rows, processing ${validRows.length} valid rows`);
+
+    return this.mapRowsToSalesData(validRows, marketplace);
   }
 
   private async parseExcelFile(filePath: string, marketplace: Marketplace) {
@@ -210,7 +278,7 @@ export class FileParsingProcessor {
     // Validate and parse date - this must be the last validation step
     const parsedDate = this.parseAndValidateDate(dateField);
     if (!parsedDate) {
-      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
+      this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
       return null;
     }
 
@@ -265,7 +333,7 @@ export class FileParsingProcessor {
     // Validate and parse date - this must be the last validation step
     const parsedDate = this.parseAndValidateDate(dateField);
     if (!parsedDate) {
-      this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
+      this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
       return null;
     }
 
@@ -290,11 +358,21 @@ export class FileParsingProcessor {
     }
 
     // Convert to string and trim whitespace
-    const dateString = String(dateField).trim();
+    let dateString = String(dateField).trim();
+    
+    // Log the original date field for debugging
+    if (dateString.length > 20 || /[а-яё]/i.test(dateString)) {
+      this.logger.debug(`Processing suspicious date field: "${dateString}"`);
+    }
+    
+    // First, check if this looks like a date at all
+    // Must contain at least one digit and be reasonable length
+    if (!/\d/.test(dateString) || dateString.length < 8 || dateString.length > 50) {
+      return null;
+    }
     
     // Skip if the field looks corrupted (contains product names or other non-date data)
-    if (dateString.length > 50 || 
-        /[а-яё]/i.test(dateString) || // Contains Cyrillic characters
+    if (/[а-яё]/i.test(dateString) || // Contains Cyrillic characters
         dateString.includes('"') ||
         dateString.includes('\n') ||
         /\d{10,}/.test(dateString) || // Contains long numbers (likely corrupted)
@@ -318,8 +396,37 @@ export class FileParsingProcessor {
         dateString.includes('Планшет') ||
         dateString.includes('Набор') ||
         dateString.includes('Кроссовки') ||
-        dateString.includes('Матрас')) {
+        dateString.includes('Матрас') ||
+        dateString.includes('Apple') ||
+        dateString.includes('Nike') ||
+        dateString.includes('Samsung') ||
+        dateString.includes('Dyson') ||
+        dateString.includes('JBL') ||
+        dateString.includes('Logitech') ||
+        dateString.includes('Stanley') ||
+        dateString.includes('Tefal') ||
+        dateString.includes('Philips') ||
+        dateString.includes('iPad') ||
+        dateString.includes('iPhone') ||
+        dateString.includes('AirPods') ||
+        dateString.includes('Galaxy') ||
+        dateString.includes('Watch') ||
+        dateString.includes('RTX') ||
+        dateString.includes('HD7447')) {
       return null;
+    }
+    
+    // Extract potential date from the beginning of the string if it contains other data
+    // Look for DD.MM.YYYY pattern at the start
+    const dateMatch = dateString.match(/^(\d{1,2}\.\d{1,2}\.\d{4})/);
+    if (dateMatch) {
+      dateString = dateMatch[1];
+    } else {
+      // Look for other common date patterns
+      const altDateMatch = dateString.match(/^(\d{4}-\d{1,2}-\d{1,2})/);
+      if (altDateMatch) {
+        dateString = altDateMatch[1];
+      }
     }
 
     // Try to parse the date

@@ -15,7 +15,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiConsumes, ApiBody } from '@nestjs/swagger';
 import { UploadsService } from './uploads.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
-import { Marketplace } from '@prisma/client';
+import { Marketplace } from '../common/constants';
 import { UploadFileDto } from './dto/upload-file.dto';
 
 @ApiTags('Uploads')
@@ -37,7 +37,7 @@ export class UploadsController {
   @ApiResponse({ status: 400, description: 'Неверный формат файла' })
   async uploadFile(
     @UploadedFile() file: Express.Multer.File,
-    @Body('marketplace', new ParseEnumPipe(Marketplace)) marketplace: Marketplace,
+    @Body('marketplace') marketplace: Marketplace,
     @Request() req,
   ) {
     return this.uploadsService.uploadFile(file, req.user.id, marketplace);

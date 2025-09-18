@@ -1,6 +1,6 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsEnum } from 'class-validator';
-import { Marketplace } from '@prisma/client';
+import { Marketplace } from '../../common/constants';
 
 export class UploadFileDto {
   @ApiProperty({

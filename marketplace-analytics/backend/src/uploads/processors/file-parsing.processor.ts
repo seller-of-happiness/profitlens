@@ -3,7 +3,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Job } from 'bull';
 import { PrismaService } from '../../prisma/prisma.service';
 import { AnalyticsService } from '../../analytics/analytics.service';
-import { Marketplace } from '@prisma/client';
+import { Marketplace } from '../../common/constants';
 import * as XLSX from 'xlsx';
 import * as Papa from 'papaparse';
 import * as fs from 'fs';

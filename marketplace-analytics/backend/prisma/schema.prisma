@@ -6,8 +6,8 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider = "sqlite"
+  url      = "file:./dev.db"
 }
 
 model User {
@@ -15,7 +15,7 @@ model User {
   email     String           @unique
   password  String
   name      String?
-  plan      SubscriptionPlan @default(FREE)
+  plan      String           @default("FREE")
   createdAt DateTime         @default(now())
   updatedAt DateTime         @updatedAt
   reports   Report[]
@@ -28,7 +28,7 @@ model Report {
   userId       String
   user         User        @relation(fields: [userId], references: [id], onDelete: Cascade)
   fileName     String
-  marketplace  Marketplace
+  marketplace  String
   uploadDate   DateTime    @default(now())
   processed    Boolean     @default(false)
   totalRevenue Float?
@@ -58,14 +58,6 @@ model SalesData {
   @@map("sales_data")
 }
 
-enum SubscriptionPlan {
-  FREE
-  START
-  BUSINESS
-  PRO
-}
-
-enum Marketplace {
-  WILDBERRIES
-  OZON
-}
+// Enums converted to string constants for SQLite compatibility
+// SubscriptionPlan: FREE, START, BUSINESS, PRO
+// Marketplace: WILDBERRIES, OZON

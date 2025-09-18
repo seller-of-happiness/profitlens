@@ -47,7 +47,7 @@ export class UploadsService {
     //   marketplace,
     // });
     
-    // For now, just mark as processed
+    // For now, just mark as processed (TODO: implement proper file processing)
     await this.prisma.report.update({
       where: { id: report.id },
       data: { processed: true },
@@ -188,8 +188,7 @@ export class UploadsService {
       },
     });
 
-    // Для упрощения пока просто помечаем как обработанный
-    // В будущем здесь должна быть очередь для обработки
+    // Для упрощения пока просто помечаем как обработанный (TODO: implement proper file processing)
     await this.prisma.report.update({
       where: { id: reportId },
       data: { processed: true },

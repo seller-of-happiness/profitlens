@@ -31,29 +31,27 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         this.logger.log(`Starting to parse file for report ${reportId}`);
         try {
             const parsedData = await this.parseFile(filePath, marketplace);
-            const salesData = await Promise.all(parsedData.map(async (row) => {
-                const analytics = await this.analyticsService.calculateRowAnalytics(row, marketplace);
-                return {
-                    reportId,
-                    ...analytics,
-                };
-            }));
-            await this.prisma.$transaction(async (tx) => {
-                const validSalesData = salesData.filter(item => {
-                    const isValidDate = item.saleDate instanceof Date && !isNaN(item.saleDate.getTime());
-                    const hasRequiredFields = item.sku && item.productName && item.quantity > 0 && item.price >= 0;
-                    if (!isValidDate) {
-                        this.logger.warn(`Filtering out item with invalid date: SKU ${item.sku}, Date: ${item.saleDate}`);
-                    }
-                    if (!hasRequiredFields) {
-                        this.logger.warn(`Filtering out item with missing required fields: SKU ${item.sku}`);
-                    }
-                    return isValidDate && hasRequiredFields;
-                });
-                if (validSalesData.length === 0) {
-                    throw new Error('No valid sales data found after filtering. Please check your file format.');
+            const salesData = await Promise.allSettled(parsedData.map(async (row) => {
+                try {
+                    const analytics = await this.analyticsService.calculateRowAnalytics(row, marketplace);
+                    return {
+                        reportId,
+                        ...analytics,
+                    };
                 }
-                this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${salesData.length} total records`);
+                catch (error) {
+                    this.logger.warn(`Failed to process row with SKU ${row?.sku}: ${error.message}`);
+                    return null;
+                }
+            }));
+            const validSalesData = salesData
+                .filter((result) => result.status === 'fulfilled' && result.value !== null)
+                .map(result => result.value);
+            await this.prisma.$transaction(async (tx) => {
+                if (validSalesData.length === 0) {
+                    throw new Error('No valid sales data found after processing. Please check your file format.');
+                }
+                this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${parsedData.length} total parsed records`);
                 await tx.salesData.createMany({
                     data: validSalesData,
                 });
@@ -98,10 +96,21 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
     }
     async parseCsvFile(filePath, marketplace) {
         const fileContent = fs.readFileSync(filePath, 'utf8');
-        const parsed = Papa.parse(fileContent, {
+        const cleanedContent = fileContent
+            .replace(/\0/g, '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n');
+        const parsed = Papa.parse(cleanedContent, {
             header: true,
             skipEmptyLines: true,
+            delimiter: ',',
+            quoteChar: '"',
+            escapeChar: '"',
+            transformHeader: (header) => header.trim(),
         });
+        if (parsed.errors && parsed.errors.length > 0) {
+            this.logger.warn(`CSV parsing errors found:`, parsed.errors.slice(0, 5));
+        }
         return this.mapRowsToSalesData(parsed.data, marketplace);
     }
     async parseExcelFile(filePath, marketplace) {
@@ -134,17 +143,35 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (!dateField || !skuField || !nameField || !priceField || !quantityField) {
             return null;
         }
+        const skuString = String(skuField).trim();
+        const nameString = String(nameField).trim();
+        if (skuString.length < 3 || skuString.length > 20 ||
+            nameString.length < 3 || nameString.length > 200 ||
+            nameString.includes('\n') || nameString.includes(',')) {
+            this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
+            return null;
+        }
         const parsedDate = this.parseAndValidateDate(dateField);
         if (!parsedDate) {
             this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
             return null;
         }
+        const quantity = parseInt(quantityField);
+        const price = parseFloat(priceField);
+        if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
+            this.logger.warn(`Invalid quantity for SKU ${skuField}: ${quantityField}`);
+            return null;
+        }
+        if (isNaN(price) || price < 0 || price > 1000000) {
+            this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+            return null;
+        }
         return {
-            sku: String(skuField),
-            productName: String(nameField),
+            sku: skuString,
+            productName: nameString,
             saleDate: parsedDate,
-            quantity: parseInt(quantityField) || 1,
-            price: parseFloat(priceField) || 0,
+            quantity,
+            price,
             commission: parseFloat(commissionField) || 0,
         };
     }
@@ -158,17 +185,35 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         if (!dateField || !skuField || !nameField || !priceField || !quantityField) {
             return null;
         }
+        const skuString = String(skuField).trim();
+        const nameString = String(nameField).trim();
+        if (skuString.length < 3 || skuString.length > 20 ||
+            nameString.length < 3 || nameString.length > 200 ||
+            nameString.includes('\n') || nameString.includes(',')) {
+            this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
+            return null;
+        }
         const parsedDate = this.parseAndValidateDate(dateField);
         if (!parsedDate) {
             this.logger.warn(`Invalid date field for SKU ${skuField}: ${dateField}`);
             return null;
         }
+        const quantity = parseInt(quantityField);
+        const price = parseFloat(priceField);
+        if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
+            this.logger.warn(`Invalid quantity for SKU ${skuField}: ${quantityField}`);
+            return null;
+        }
+        if (isNaN(price) || price < 0 || price > 1000000) {
+            this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+            return null;
+        }
         return {
-            sku: String(skuField),
-            productName: String(nameField),
+            sku: skuString,
+            productName: nameString,
             saleDate: parsedDate,
-            quantity: parseInt(quantityField) || 1,
-            price: parseFloat(priceField) || 0,
+            quantity,
+            price,
             commission: parseFloat(commissionField) || 0,
         };
     }
@@ -178,6 +223,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         }
         const dateString = String(dateField).trim();
         if (dateString.length > 50 ||
+            /[а-яё]/i.test(dateString) ||
+            dateString.includes('"') ||
+            dateString.includes('\n') ||
+            /\d{10,}/.test(dateString) ||
+            /[,;:]{2,}/.test(dateString) ||
             dateString.includes('Видеокарта') ||
             dateString.includes('Фен') ||
             dateString.includes('Книга') ||

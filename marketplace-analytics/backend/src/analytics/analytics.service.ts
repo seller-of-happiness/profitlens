@@ -43,6 +43,27 @@ export class AnalyticsService {
   };
 
   async calculateRowAnalytics(row: ParsedSalesRow, marketplace: Marketplace) {
+    // Additional validation to ensure we never process invalid data
+    if (!row.saleDate || !(row.saleDate instanceof Date) || isNaN(row.saleDate.getTime())) {
+      throw new Error(`Invalid sale date provided: ${row.saleDate}`);
+    }
+    
+    if (!row.sku || typeof row.sku !== 'string' || row.sku.trim().length === 0) {
+      throw new Error(`Invalid SKU provided: ${row.sku}`);
+    }
+    
+    if (!row.productName || typeof row.productName !== 'string' || row.productName.trim().length === 0) {
+      throw new Error(`Invalid product name provided: ${row.productName}`);
+    }
+    
+    if (!row.quantity || isNaN(row.quantity) || row.quantity <= 0) {
+      throw new Error(`Invalid quantity provided: ${row.quantity}`);
+    }
+    
+    if (isNaN(row.price) || row.price < 0) {
+      throw new Error(`Invalid price provided: ${row.price}`);
+    }
+
     const commissions = this.MARKETPLACE_COMMISSIONS[marketplace];
     const revenue = row.price * row.quantity;
 
@@ -67,8 +88,8 @@ export class AnalyticsService {
     const profitMargin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
 
     return {
-      sku: row.sku,
-      productName: row.productName,
+      sku: row.sku.trim(),
+      productName: row.productName.trim(),
       saleDate: row.saleDate,
       quantity: row.quantity,
       price: row.price,

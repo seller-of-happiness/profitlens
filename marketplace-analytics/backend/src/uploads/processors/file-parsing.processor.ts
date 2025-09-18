@@ -35,42 +35,39 @@ export class FileParsingProcessor {
       // Парсинг файла
       const parsedData = await this.parseFile(filePath, marketplace);
       
-      // Расчет аналитики для каждой строки
-      const salesData = await Promise.all(
+      // Расчет аналитики для каждой строки с обработкой ошибок
+      const salesData = await Promise.allSettled(
         parsedData.map(async (row) => {
-          const analytics = await this.analyticsService.calculateRowAnalytics(
-            row,
-            marketplace,
-          );
-          return {
-            reportId,
-            ...analytics,
-          };
+          try {
+            const analytics = await this.analyticsService.calculateRowAnalytics(
+              row,
+              marketplace,
+            );
+            return {
+              reportId,
+              ...analytics,
+            };
+          } catch (error) {
+            this.logger.warn(`Failed to process row with SKU ${row?.sku}: ${error.message}`);
+            return null;
+          }
         }),
       );
 
+      // Extract successful results and filter out failed ones
+      const validSalesData = salesData
+        .filter((result): result is PromiseFulfilledResult<any> => 
+          result.status === 'fulfilled' && result.value !== null
+        )
+        .map(result => result.value);
+
       // Сохранение данных в БД
       await this.prisma.$transaction(async (tx) => {
-        // Filter out any remaining invalid data before saving
-        const validSalesData = salesData.filter(item => {
-          const isValidDate = item.saleDate instanceof Date && !isNaN(item.saleDate.getTime());
-          const hasRequiredFields = item.sku && item.productName && item.quantity > 0 && item.price >= 0;
-          
-          if (!isValidDate) {
-            this.logger.warn(`Filtering out item with invalid date: SKU ${item.sku}, Date: ${item.saleDate}`);
-          }
-          if (!hasRequiredFields) {
-            this.logger.warn(`Filtering out item with missing required fields: SKU ${item.sku}`);
-          }
-          
-          return isValidDate && hasRequiredFields;
-        });
-
         if (validSalesData.length === 0) {
-          throw new Error('No valid sales data found after filtering. Please check your file format.');
+          throw new Error('No valid sales data found after processing. Please check your file format.');
         }
 
-        this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${salesData.length} total records`);
+        this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${parsedData.length} total parsed records`);
 
         // Сохранение данных продаж
         await tx.salesData.createMany({
@@ -127,10 +124,26 @@ export class FileParsingProcessor {
 
   private async parseCsvFile(filePath: string, marketplace: Marketplace) {
     const fileContent = fs.readFileSync(filePath, 'utf8');
-    const parsed = Papa.parse(fileContent, {
+    
+    // Clean up the file content to handle potential encoding issues
+    const cleanedContent = fileContent
+      .replace(/\0/g, '') // Remove null bytes
+      .replace(/\r\n/g, '\n') // Normalize line endings
+      .replace(/\r/g, '\n'); // Handle old Mac line endings
+    
+    const parsed = Papa.parse(cleanedContent, {
       header: true,
       skipEmptyLines: true,
+      delimiter: ',',
+      quoteChar: '"',
+      escapeChar: '"',
+      transformHeader: (header) => header.trim(), // Clean headers
     });
+
+    // Log parsing errors if any
+    if (parsed.errors && parsed.errors.length > 0) {
+      this.logger.warn(`CSV parsing errors found:`, parsed.errors.slice(0, 5)); // Log first 5 errors
+    }
 
     return this.mapRowsToSalesData(parsed.data, marketplace);
   }
@@ -168,6 +181,18 @@ export class FileParsingProcessor {
       return null;
     }
 
+    // Additional validation for corrupted data
+    const skuString = String(skuField).trim();
+    const nameString = String(nameField).trim();
+    
+    // Skip rows with obviously corrupted data
+    if (skuString.length < 3 || skuString.length > 20 || 
+        nameString.length < 3 || nameString.length > 200 ||
+        nameString.includes('\n') || nameString.includes(',')) {
+      this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
+      return null;
+    }
+
     // Validate and parse date
     const parsedDate = this.parseAndValidateDate(dateField);
     if (!parsedDate) {
@@ -175,12 +200,26 @@ export class FileParsingProcessor {
       return null;
     }
 
+    // Validate numeric fields
+    const quantity = parseInt(quantityField);
+    const price = parseFloat(priceField);
+    
+    if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
+      this.logger.warn(`Invalid quantity for SKU ${skuField}: ${quantityField}`);
+      return null;
+    }
+    
+    if (isNaN(price) || price < 0 || price > 1000000) {
+      this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+      return null;
+    }
+
     return {
-      sku: String(skuField),
-      productName: String(nameField),
+      sku: skuString,
+      productName: nameString,
       saleDate: parsedDate,
-      quantity: parseInt(quantityField) || 1,
-      price: parseFloat(priceField) || 0,
+      quantity,
+      price,
       commission: parseFloat(commissionField) || 0,
     };
   }
@@ -197,6 +236,18 @@ export class FileParsingProcessor {
       return null;
     }
 
+    // Additional validation for corrupted data
+    const skuString = String(skuField).trim();
+    const nameString = String(nameField).trim();
+    
+    // Skip rows with obviously corrupted data
+    if (skuString.length < 3 || skuString.length > 20 || 
+        nameString.length < 3 || nameString.length > 200 ||
+        nameString.includes('\n') || nameString.includes(',')) {
+      this.logger.warn(`Skipping corrupted row: SKU ${skuString}, Name: ${nameString.substring(0, 50)}...`);
+      return null;
+    }
+
     // Validate and parse date
     const parsedDate = this.parseAndValidateDate(dateField);
     if (!parsedDate) {
@@ -204,12 +255,26 @@ export class FileParsingProcessor {
       return null;
     }
 
+    // Validate numeric fields
+    const quantity = parseInt(quantityField);
+    const price = parseFloat(priceField);
+    
+    if (isNaN(quantity) || quantity <= 0 || quantity > 10000) {
+      this.logger.warn(`Invalid quantity for SKU ${skuField}: ${quantityField}`);
+      return null;
+    }
+    
+    if (isNaN(price) || price < 0 || price > 1000000) {
+      this.logger.warn(`Invalid price for SKU ${skuField}: ${priceField}`);
+      return null;
+    }
+
     return {
-      sku: String(skuField),
-      productName: String(nameField),
+      sku: skuString,
+      productName: nameString,
       saleDate: parsedDate,
-      quantity: parseInt(quantityField) || 1,
-      price: parseFloat(priceField) || 0,
+      quantity,
+      price,
       commission: parseFloat(commissionField) || 0,
     };
   }
@@ -229,6 +294,11 @@ export class FileParsingProcessor {
     
     // Skip if the field looks corrupted (contains product names or other non-date data)
     if (dateString.length > 50 || 
+        /[а-яё]/i.test(dateString) || // Contains Cyrillic characters
+        dateString.includes('"') ||
+        dateString.includes('\n') ||
+        /\d{10,}/.test(dateString) || // Contains long numbers (likely corrupted)
+        /[,;:]{2,}/.test(dateString) || // Multiple delimiters
         dateString.includes('Видеокарта') || 
         dateString.includes('Фен') || 
         dateString.includes('Книга') ||

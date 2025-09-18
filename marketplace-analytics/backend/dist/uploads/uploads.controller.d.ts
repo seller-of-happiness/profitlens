@@ -52,4 +52,12 @@ export declare class UploadsController {
     deleteReport(id: string, req: any): Promise<{
         message: string;
     }>;
+    deleteAllReports(req: any): Promise<{
+        message: string;
+        deletedCount: number;
+    }>;
+    replaceReport(id: string, file: Express.Multer.File, marketplace: Marketplace, req: any): Promise<{
+        reportId: string;
+        message: string;
+    }>;
 }

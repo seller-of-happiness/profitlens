@@ -21,6 +21,18 @@ class UploadsService {
   async deleteReport(id: string) {
     return apiService.delete(`/uploads/${id}`)
   }
+
+  async deleteAllReports() {
+    return apiService.delete('/uploads')
+  }
+
+  async replaceReport(id: string, file: File, marketplace: Marketplace) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('marketplace', marketplace)
+    
+    return apiService.uploadFile(`/uploads/${id}/replace`, formData)
+  }
 }
 
 export const uploadsService = new UploadsService()

@@ -19,6 +19,9 @@ export interface Report {
   totalRevenue?: number;
   totalProfit?: number;
   profitMargin?: number;
+  _count?: {
+    salesData: number;
+  };
 }
 
 export interface SalesData {

@@ -85,6 +85,66 @@ let UploadsService = class UploadsService {
         });
         return { message: 'Отчет удален' };
     }
+    async deleteAllReports(userId) {
+        const reports = await this.prisma.report.findMany({
+            where: { userId },
+        });
+        if (reports.length === 0) {
+            return { message: 'Нет отчетов для удаления', deletedCount: 0 };
+        }
+        const uploadDir = process.env.UPLOAD_DEST || './uploads';
+        reports.forEach((report) => {
+            const filePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+            if (fs.existsSync(filePath)) {
+                fs.unlinkSync(filePath);
+            }
+        });
+        await this.prisma.report.deleteMany({
+            where: { userId },
+        });
+        return {
+            message: `Удалено отчетов: ${reports.length}`,
+            deletedCount: reports.length
+        };
+    }
+    async replaceReport(reportId, newFile, userId, marketplace) {
+        const existingReport = await this.prisma.report.findFirst({
+            where: { id: reportId, userId },
+        });
+        if (!existingReport) {
+            throw new common_1.BadRequestException('Отчет не найден');
+        }
+        this.validateFile(newFile);
+        const uploadDir = process.env.UPLOAD_DEST || './uploads';
+        const oldFilePath = path.join(uploadDir, `${reportId}_${existingReport.fileName}`);
+        if (fs.existsSync(oldFilePath)) {
+            fs.unlinkSync(oldFilePath);
+        }
+        const newFilePath = path.join(uploadDir, `${reportId}_${newFile.originalname}`);
+        fs.writeFileSync(newFilePath, newFile.buffer);
+        await this.prisma.salesData.deleteMany({
+            where: { reportId },
+        });
+        await this.prisma.report.update({
+            where: { id: reportId },
+            data: {
+                fileName: newFile.originalname,
+                marketplace,
+                processed: false,
+                totalRevenue: null,
+                totalProfit: null,
+                profitMargin: null,
+            },
+        });
+        await this.prisma.report.update({
+            where: { id: reportId },
+            data: { processed: true },
+        });
+        return {
+            reportId,
+            message: 'Отчет успешно заменен',
+        };
+    }
     validateFile(file) {
         const allowedTypes = [
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',

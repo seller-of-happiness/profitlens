@@ -56,11 +56,13 @@
 
     <!-- Analytics content -->
     <div v-else class="space-y-6">
+      <!-- Reports Manager -->
+      <ReportsManager @reports-updated="loadAnalytics" />
       <!-- Stats cards -->
       <div class="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-4">
         <StatsCard
           title="Общая выручка"
-          :value="analytics.totalRevenue"
+          :value="analytics?.totalRevenue || 0"
           format="currency"
           color="blue"
           :icon="CurrencyDollarIcon"
@@ -69,7 +71,7 @@
         
         <StatsCard
           title="Чистая прибыль"
-          :value="analytics.totalProfit"
+          :value="analytics?.totalProfit || 0"
           format="currency"
           color="green"
           :icon="ArrowTrendingUpIcon"
@@ -78,7 +80,7 @@
         
         <StatsCard
           title="Маржинальность"
-          :value="analytics.profitMargin"
+          :value="analytics?.profitMargin || 0"
           format="percentage"
           color="purple"
           :icon="ChartBarIcon"
@@ -87,7 +89,7 @@
         
         <StatsCard
           title="Количество заказов"
-          :value="analytics.totalOrders"
+          :value="analytics?.totalOrders || 0"
           format="number"
           color="yellow"
           :icon="ShoppingBagIcon"
@@ -104,7 +106,7 @@
           </div>
           <div class="card-body">
             <LineChart
-              v-if="analytics.dailySales.length > 0"
+              v-if="analytics?.dailySales && analytics.dailySales.length > 0"
               :data="chartData"
               :options="chartOptions"
             />
@@ -138,7 +140,7 @@
           <h3 class="text-lg font-medium text-gray-900">Топ товаров по прибыли</h3>
         </div>
         <div class="card-body">
-          <div v-if="analytics.topProducts.length > 0" class="overflow-hidden">
+          <div v-if="analytics?.topProducts && analytics.topProducts.length > 0" class="overflow-hidden">
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gray-50">
                 <tr>
@@ -160,7 +162,7 @@
                 </tr>
               </thead>
               <tbody class="bg-white divide-y divide-gray-200">
-                <tr v-for="product in analytics.topProducts" :key="product.sku">
+                <tr v-for="product in analytics?.topProducts || []" :key="product.sku">
                   <td class="px-6 py-4 whitespace-nowrap">
                     <div>
                       <div class="text-sm font-medium text-gray-900">{{ product.productName }}</div>
@@ -204,6 +206,7 @@ import StatsCard from '@/components/ui/StatsCard.vue'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import LineChart from '@/components/charts/LineChart.vue'
 import PieChart from '@/components/charts/PieChart.vue'
+import ReportsManager from '@/components/dashboard/ReportsManager.vue'
 import {
   CurrencyDollarIcon,
   ArrowTrendingUpIcon,

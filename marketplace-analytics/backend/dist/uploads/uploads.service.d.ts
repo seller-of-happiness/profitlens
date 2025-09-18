@@ -52,5 +52,13 @@ export declare class UploadsService {
     deleteReport(reportId: string, userId: string): Promise<{
         message: string;
     }>;
+    deleteAllReports(userId: string): Promise<{
+        message: string;
+        deletedCount: number;
+    }>;
+    replaceReport(reportId: string, newFile: Express.Multer.File, userId: string, marketplace: Marketplace): Promise<{
+        reportId: string;
+        message: string;
+    }>;
     private validateFile;
 }

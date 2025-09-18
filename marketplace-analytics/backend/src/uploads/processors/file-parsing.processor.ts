@@ -139,6 +139,10 @@ export class FileParsingProcessor {
       .replace(/\0/g, '') // Remove null bytes
       .replace(/\r\n/g, '\n') // Normalize line endings
       .replace(/\r/g, '\n'); // Handle old Mac line endings
+
+    // CRITICAL FIX: Pre-process CSV to handle quoted fields with embedded quotes
+    // This fixes the issue with fields like: "Книга "Атомные привычки""
+    cleanedContent = this.preprocessCSVQuotes(cleanedContent);
     
     // Split into lines and clean up each line
     const lines = cleanedContent.split('\n');
@@ -664,6 +668,79 @@ export class FileParsingProcessor {
     }
 
     return parsedDate;
+  }
+
+  /**
+   * Pre-process CSV content to handle quoted fields with embedded quotes
+   * Converts: "Книга "Атомные привычки"" -> "Книга ""Атомные привычки"""
+   * @param csvContent - Raw CSV content
+   * @returns Processed CSV content with properly escaped quotes
+   */
+  private preprocessCSVQuotes(csvContent: string): string {
+    const lines = csvContent.split('\n');
+    const processedLines = lines.map((line, index) => {
+      if (index === 0) return line; // Skip header
+      if (!line.trim()) return line; // Skip empty lines
+      
+      // Handle quoted fields with embedded quotes
+      // Look for pattern: ,"text "embedded" text",
+      // This regex finds quoted fields that contain unescaped quotes
+      let processedLine = line;
+      
+      // Pattern to match quoted fields with embedded quotes
+      // Matches: ,"content with "quotes" inside",
+      const quotedFieldPattern = /,"([^"]*"[^"]*"[^"]*)",/g;
+      
+      let match;
+      while ((match = quotedFieldPattern.exec(line)) !== null) {
+        const originalField = match[0];
+        const fieldContent = match[1];
+        // Replace embedded quotes with escaped quotes (double quotes)
+        const escapedContent = fieldContent.replace(/"/g, '""');
+        const newField = `,"${escapedContent}",`;
+        processedLine = processedLine.replace(originalField, newField);
+      }
+      
+      // Also handle quoted fields at the beginning of line
+      const beginningQuotedFieldPattern = /^"([^"]*"[^"]*"[^"]*)",/;
+      const beginningMatch = beginningQuotedFieldPattern.exec(processedLine);
+      if (beginningMatch) {
+        const originalField = beginningMatch[0];
+        const fieldContent = beginningMatch[1];
+        const escapedContent = fieldContent.replace(/"/g, '""');
+        const newField = `"${escapedContent}",`;
+        processedLine = processedLine.replace(originalField, newField);
+      }
+      
+      // Handle quoted fields at the end of line
+      const endQuotedFieldPattern = /,"([^"]*"[^"]*"[^"]*)"$/;
+      const endMatch = endQuotedFieldPattern.exec(processedLine);
+      if (endMatch) {
+        const originalField = endMatch[0];
+        const fieldContent = endMatch[1];
+        const escapedContent = fieldContent.replace(/"/g, '""');
+        const newField = `,"${escapedContent}"`;
+        processedLine = processedLine.replace(originalField, newField);
+      }
+      
+      // Handle single quoted field (entire line is one quoted field)
+      const singleQuotedFieldPattern = /^"([^"]*"[^"]*"[^"]*)"$/;
+      const singleMatch = singleQuotedFieldPattern.exec(processedLine);
+      if (singleMatch) {
+        const fieldContent = singleMatch[1];
+        const escapedContent = fieldContent.replace(/"/g, '""');
+        processedLine = `"${escapedContent}"`;
+      }
+      
+      // Log if we made changes
+      if (processedLine !== line) {
+        this.logger.debug(`Fixed quotes in line: "${line.substring(0, 50)}..." -> "${processedLine.substring(0, 50)}..."`);
+      }
+      
+      return processedLine;
+    });
+    
+    return processedLines.join('\n');
   }
 
   /**

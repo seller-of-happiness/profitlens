@@ -1,7 +1,7 @@
 import { PartialType } from '@nestjs/swagger';
 import { IsOptional, IsString, IsEnum } from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
-import { SubscriptionPlan } from '@prisma/client';
+import { SubscriptionPlan } from '../../common/constants';
 
 export class UpdateUserDto {
   @ApiProperty({

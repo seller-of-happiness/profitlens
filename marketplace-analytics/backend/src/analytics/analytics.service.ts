@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { Marketplace } from '@prisma/client';
+import { Marketplace } from '../common/constants';
 
 interface ParsedSalesRow {
   sku: string;

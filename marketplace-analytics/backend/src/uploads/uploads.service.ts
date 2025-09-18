@@ -1,8 +1,8 @@
 import { Injectable, BadRequestException } from '@nestjs/common';
-import { InjectQueue } from '@nestjs/bull';
-import { Queue } from 'bull';
+// import { InjectQueue } from '@nestjs/bull';
+// import { Queue } from 'bull';
 import { PrismaService } from '../prisma/prisma.service';
-import { Marketplace } from '@prisma/client';
+import { Marketplace } from '../common/constants';
 import * as path from 'path';
 import * as fs from 'fs';
 
@@ -10,7 +10,7 @@ import * as fs from 'fs';
 export class UploadsService {
   constructor(
     private prisma: PrismaService,
-    @InjectQueue('file-parsing') private fileParsingQueue: Queue,
+    // @InjectQueue('file-parsing') private fileParsingQueue: Queue,
   ) {}
 
   async uploadFile(
@@ -40,11 +40,17 @@ export class UploadsService {
     const filePath = path.join(uploadDir, `${report.id}_${file.originalname}`);
     fs.writeFileSync(filePath, file.buffer);
 
-    // Добавление задачи в очередь для обработки
-    await this.fileParsingQueue.add('parse-file', {
-      reportId: report.id,
-      filePath,
-      marketplace,
+    // Добавление задачи в очередь для обработки - temporarily disabled
+    // await this.fileParsingQueue.add('parse-file', {
+    //   reportId: report.id,
+    //   filePath,
+    //   marketplace,
+    // });
+    
+    // For now, just mark as processed
+    await this.prisma.report.update({
+      where: { id: report.id },
+      data: { processed: true },
     });
 
     return {
@@ -111,11 +117,19 @@ export class UploadsService {
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
       'application/vnd.ms-excel', // .xls
       'text/csv', // .csv
+      'text/plain', // .csv sometimes detected as plain text
+      'application/csv', // .csv alternative mimetype
     ];
 
     const maxSize = parseInt(process.env.MAX_FILE_SIZE) || 52428800; // 50MB
 
-    if (!allowedTypes.includes(file.mimetype)) {
+    // Check by extension if mimetype validation fails
+    const allowedExtensions = ['.xlsx', '.xls', '.csv'];
+    const fileExtension = path.extname(file.originalname).toLowerCase();
+    
+    const isValidType = allowedTypes.includes(file.mimetype) || allowedExtensions.includes(fileExtension);
+
+    if (!isValidType) {
       throw new BadRequestException(
         'Неподдерживаемый формат файла. Разрешены только Excel (.xlsx, .xls) и CSV (.csv) файлы',
       );

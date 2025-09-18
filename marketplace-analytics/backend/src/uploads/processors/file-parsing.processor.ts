@@ -61,22 +61,31 @@ export class FileParsingProcessor {
         )
         .map(result => result.value);
 
+      // Additional validation to ensure all dates are valid before database insertion
+      const finalValidatedData = validSalesData.filter(item => {
+        if (!item.saleDate || isNaN(item.saleDate.getTime())) {
+          this.logger.warn(`Filtering out item with invalid date - SKU: ${item.sku}, Date: ${item.saleDate}`);
+          return false;
+        }
+        return true;
+      });
+
       // Сохранение данных в БД
       await this.prisma.$transaction(async (tx) => {
-        if (validSalesData.length === 0) {
-          throw new Error('No valid sales data found after processing. Please check your file format.');
+        if (finalValidatedData.length === 0) {
+          throw new Error('No valid sales data found after processing and validation. Please check your file format and date fields.');
         }
 
-        this.logger.log(`Processing ${validSalesData.length} valid sales records out of ${parsedData.length} total parsed records`);
+        this.logger.log(`Processing ${finalValidatedData.length} valid sales records out of ${parsedData.length} total parsed records`);
 
         // Сохранение данных продаж
         await tx.salesData.createMany({
-          data: validSalesData,
+          data: finalValidatedData,
         });
 
         // Расчет общих метрик отчета
-        const totalRevenue = validSalesData.reduce((sum, item) => sum + item.revenue, 0);
-        const totalProfit = validSalesData.reduce((sum, item) => sum + item.netProfit, 0);
+        const totalRevenue = finalValidatedData.reduce((sum, item) => sum + item.revenue, 0);
+        const totalProfit = finalValidatedData.reduce((sum, item) => sum + item.netProfit, 0);
         const profitMargin = totalRevenue > 0 ? (totalProfit / totalRevenue) * 100 : 0;
 
         // Обновление отчета
@@ -281,6 +290,12 @@ export class FileParsingProcessor {
       this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
       return null;
     }
+    
+    // Double-check that the parsed date is valid
+    if (isNaN(parsedDate.getTime())) {
+      this.logger.warn(`Parsed date is NaN for SKU ${skuField}: "${dateField}" -> ${parsedDate}`);
+      return null;
+    }
 
     return {
       sku: skuString,
@@ -336,6 +351,12 @@ export class FileParsingProcessor {
       this.logger.warn(`Invalid date field for SKU ${skuField}: "${dateField}" (type: ${typeof dateField})`);
       return null;
     }
+    
+    // Double-check that the parsed date is valid
+    if (isNaN(parsedDate.getTime())) {
+      this.logger.warn(`Parsed date is NaN for SKU ${skuField}: "${dateField}" -> ${parsedDate}`);
+      return null;
+    }
 
     return {
       sku: skuString,
@@ -368,6 +389,7 @@ export class FileParsingProcessor {
     // First, check if this looks like a date at all
     // Must contain at least one digit and be reasonable length
     if (!/\d/.test(dateString) || dateString.length < 8 || dateString.length > 50) {
+      this.logger.warn(`Date field too short or too long: "${dateString}"`);
       return null;
     }
     
@@ -446,6 +468,7 @@ export class FileParsingProcessor {
             day < 1 || day > 31 || 
             month < 1 || month > 12 ||
             year < 1900 || year > 2100) {
+          this.logger.warn(`Invalid date components: day=${day}, month=${month}, year=${year} from "${dateString}"`);
           return null;
         }
         
@@ -455,10 +478,12 @@ export class FileParsingProcessor {
         if (parsedDate.getDate() !== day || 
             parsedDate.getMonth() !== month - 1 || 
             parsedDate.getFullYear() !== year) {
+          this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${parsedDate.getDate()}/${parsedDate.getMonth() + 1}/${parsedDate.getFullYear()}`);
           return null;
         }
       } else {
         // Fallback for malformed dot-separated dates
+        this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
         return null;
       }
     } else if (dateString.includes('-')) {
@@ -501,6 +526,7 @@ export class FileParsingProcessor {
 
     // Validate the parsed date
     if (isNaN(parsedDate.getTime())) {
+      this.logger.warn(`Final date validation failed for "${dateString}": parsedDate.getTime() is NaN`);
       return null;
     }
 
@@ -509,9 +535,60 @@ export class FileParsingProcessor {
     const dateYear = parsedDate.getFullYear();
     
     if (dateYear < 2020 || dateYear > currentYear + 1) {
+      this.logger.warn(`Date year out of range for "${dateString}": ${dateYear} (expected 2020-${currentYear + 1})`);
       return null;
     }
 
+    this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
     return parsedDate;
+  }
+
+  /**
+   * Helper function to safely parse date from string with DD.MM.YYYY format
+   * @param dateString - Date string in DD.MM.YYYY format
+   * @returns Valid Date object or null if invalid
+   */
+  private parseDate(dateString: string): Date | null {
+    if (!dateString || typeof dateString !== 'string') {
+      return null;
+    }
+
+    // Clean the date string
+    const cleanDateString = dateString.trim();
+    
+    // Handle DD.MM.YYYY format specifically
+    const dateParts = cleanDateString.split('.');
+    if (dateParts.length === 3) {
+      const day = parseInt(dateParts[0]);
+      const month = parseInt(dateParts[1]);
+      const year = parseInt(dateParts[2]);
+      
+      // Validate ranges
+      if (isNaN(day) || isNaN(month) || isNaN(year) ||
+          day < 1 || day > 31 || 
+          month < 1 || month > 12 ||
+          year < 2020 || year > 2030) {
+        return null;
+      }
+      
+      const date = new Date(year, month - 1, day);
+      
+      // Verify the date didn't roll over
+      if (date.getDate() !== day || 
+          date.getMonth() !== month - 1 || 
+          date.getFullYear() !== year) {
+        return null;
+      }
+      
+      return date;
+    }
+    
+    // Fallback to regular Date parsing for other formats
+    const parsed = new Date(cleanDateString);
+    if (isNaN(parsed.getTime())) {
+      return null;
+    }
+    
+    return parsed;
   }
 }

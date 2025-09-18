@@ -19,5 +19,6 @@ export declare class FileParsingProcessor {
     private mapRowsToSalesData;
     private mapWildberriesRow;
     private mapOzonRow;
+    private parseAndValidateDate;
 }
 export {};

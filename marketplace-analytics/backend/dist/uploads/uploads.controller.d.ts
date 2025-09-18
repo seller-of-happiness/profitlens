@@ -13,6 +13,7 @@ export declare class UploadsController {
         };
     } & {
         id: string;
+        userId: string;
         fileName: string;
         marketplace: string;
         uploadDate: Date;
@@ -20,7 +21,6 @@ export declare class UploadsController {
         totalRevenue: number | null;
         totalProfit: number | null;
         profitMargin: number | null;
-        userId: string;
     })[]>;
     getReport(id: string, req: any): Promise<{
         salesData: {
@@ -40,6 +40,7 @@ export declare class UploadsController {
         }[];
     } & {
         id: string;
+        userId: string;
         fileName: string;
         marketplace: string;
         uploadDate: Date;
@@ -47,7 +48,6 @@ export declare class UploadsController {
         totalRevenue: number | null;
         totalProfit: number | null;
         profitMargin: number | null;
-        userId: string;
     }>;
     deleteReport(id: string, req: any): Promise<{
         message: string;

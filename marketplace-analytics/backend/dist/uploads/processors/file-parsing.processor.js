@@ -111,19 +111,40 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
         const cleanedLines = lines.map((line, index) => {
             if (index === 0)
                 return line;
-            if (line.includes('Книга') || line.includes('Видеокарта') || line.includes('Фен') ||
-                line.includes('Кофеварка') || line.includes('Пылесос') || line.includes('Электрочайник')) {
+            if (!line.trim())
+                return '';
+            const startsWithDate = /^\d{1,2}\.\d{1,2}\.\d{4}/.test(line.trim());
+            if (!startsWithDate) {
                 const dateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
                 if (dateMatch) {
                     const dateStr = dateMatch[1];
                     const dateIndex = line.indexOf(dateStr);
-                    const afterDate = line.substring(dateIndex);
-                    const parts = afterDate.split(',');
+                    let reconstructedLine = line.substring(dateIndex);
+                    reconstructedLine = reconstructedLine.replace(/^[,"\s]+/, '');
+                    const parts = reconstructedLine.split(',');
                     if (parts.length >= 7) {
-                        return afterDate;
+                        this.logger.debug(`Reconstructed corrupted line: "${line.substring(0, 100)}..." -> "${reconstructedLine.substring(0, 100)}..."`);
+                        return reconstructedLine;
                     }
                 }
+                this.logger.warn(`Skipping corrupted line that doesn't start with date: "${line.substring(0, 100)}..."`);
                 return '';
+            }
+            const parts = line.split(',');
+            if (parts.length >= 3) {
+                const skuField = parts[1];
+                if (skuField && (skuField.includes('Книга') || skuField.includes('Видеокарта') ||
+                    skuField.includes('Фен') || skuField.includes('Кофеварка') ||
+                    skuField.includes('Пылесос') || skuField.includes('Электрочайник') ||
+                    skuField.length > 50)) {
+                    this.logger.warn(`Skipping line with corrupted SKU field: "${line.substring(0, 100)}..."`);
+                    return '';
+                }
+                const nameField = parts[2];
+                if (nameField && (nameField.length > 200 || nameField.includes('\n'))) {
+                    this.logger.warn(`Skipping line with corrupted name field: "${line.substring(0, 100)}..."`);
+                    return '';
+                }
             }
             return line;
         }).filter(line => line.trim() !== '');
@@ -363,20 +384,46 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                     return null;
                 }
                 this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
+                if (isNaN(parsedDate.getTime())) {
+                    this.logger.warn(`Date creation failed for "${dateString}": parsedDate.getTime() is NaN`);
+                    return null;
+                }
+                return parsedDate;
             }
             else {
                 this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
                 return null;
             }
         }
-        else if (dateString.includes('-')) {
-            parsedDate = new Date(dateString);
+        else if (dateString.includes('-') && /^\d{4}-\d{1,2}-\d{1,2}/.test(dateString)) {
+            const parts = dateString.split('-');
+            if (parts.length === 3) {
+                const year = parseInt(parts[0]);
+                const month = parseInt(parts[1]);
+                const day = parseInt(parts[2]);
+                if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                    day < 1 || day > 31 ||
+                    month < 1 || month > 12 ||
+                    year < 1900 || year > 2100) {
+                    return null;
+                }
+                parsedDate = new Date(Date.UTC(year, month - 1, day));
+                const createdDay = parsedDate.getUTCDate();
+                const createdMonth = parsedDate.getUTCMonth() + 1;
+                const createdYear = parsedDate.getUTCFullYear();
+                if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+                    return null;
+                }
+            }
+            else {
+                return null;
+            }
         }
         else if (dateString.includes('/')) {
             const parts = dateString.split('/');
             if (parts.length === 3) {
-                const month = parseInt(parts[0]);
-                const day = parseInt(parts[1]);
+                const day = parseInt(parts[0]);
+                const month = parseInt(parts[1]);
                 const year = parseInt(parts[2]);
                 if (isNaN(day) || isNaN(month) || isNaN(year) ||
                     day < 1 || day > 31 ||
@@ -418,32 +465,28 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             }
         }
         else {
-            if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) {
-                parsedDate = new Date(dateString);
-            }
-            else {
-                const dotParts = dateString.split('.');
-                if (dotParts.length === 3) {
-                    const day = parseInt(dotParts[0]);
-                    const month = parseInt(dotParts[1]);
-                    const year = parseInt(dotParts[2]);
-                    if (isNaN(day) || isNaN(month) || isNaN(year) ||
-                        day < 1 || day > 31 ||
-                        month < 1 || month > 12 ||
-                        year < 1900 || year > 2100) {
-                        return null;
-                    }
-                    parsedDate = new Date(Date.UTC(year, month - 1, day));
-                    const createdDay = parsedDate.getUTCDate();
-                    const createdMonth = parsedDate.getUTCMonth() + 1;
-                    const createdYear = parsedDate.getUTCFullYear();
-                    if (createdDay !== day || createdMonth !== month || createdYear !== year) {
-                        return null;
-                    }
-                }
-                else {
+            const dotParts = dateString.split('.');
+            if (dotParts.length === 3) {
+                const day = parseInt(dotParts[0]);
+                const month = parseInt(dotParts[1]);
+                const year = parseInt(dotParts[2]);
+                if (isNaN(day) || isNaN(month) || isNaN(year) ||
+                    day < 1 || day > 31 ||
+                    month < 1 || month > 12 ||
+                    year < 1900 || year > 2100) {
                     return null;
                 }
+                parsedDate = new Date(Date.UTC(year, month - 1, day));
+                const createdDay = parsedDate.getUTCDate();
+                const createdMonth = parsedDate.getUTCMonth() + 1;
+                const createdYear = parsedDate.getUTCFullYear();
+                if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+                    return null;
+                }
+            }
+            else {
+                this.logger.warn(`Unrecognized date format: "${dateString}"`);
+                return null;
             }
         }
         if (isNaN(parsedDate.getTime())) {

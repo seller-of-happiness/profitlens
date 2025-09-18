@@ -490,8 +490,31 @@ export class FileParsingProcessor {
       // YYYY-MM-DD format or similar
       parsedDate = new Date(dateString);
     } else if (dateString.includes('/')) {
-      // MM/DD/YYYY or DD/MM/YYYY format
-      parsedDate = new Date(dateString);
+      // Handle MM/DD/YYYY format with explicit parsing to avoid ambiguity
+      const parts = dateString.split('/');
+      if (parts.length === 3) {
+        // Assume MM/DD/YYYY format for slash-separated dates
+        const month = parseInt(parts[0]);
+        const day = parseInt(parts[1]);
+        const year = parseInt(parts[2]);
+        
+        if (isNaN(day) || isNaN(month) || isNaN(year) ||
+            day < 1 || day > 31 || 
+            month < 1 || month > 12 ||
+            year < 1900 || year > 2100) {
+          return null;
+        }
+        
+        parsedDate = new Date(year, month - 1, day);
+        
+        if (parsedDate.getDate() !== day || 
+            parsedDate.getMonth() !== month - 1 || 
+            parsedDate.getFullYear() !== year) {
+          return null;
+        }
+      } else {
+        return null;
+      }
     } else if (/^\d{1,2}\s+\d{1,2}\s+\d{4}$/.test(dateString)) {
       // Handle space-separated dates like "17 09 2025"
       const parts = dateString.split(/\s+/);
@@ -515,12 +538,35 @@ export class FileParsingProcessor {
         return null;
       }
     } else {
-      // Try parsing as-is only if it looks like a valid date format
-      if (/^\d{4}-\d{2}-\d{2}/.test(dateString) || 
-          /^\d{1,2}\/\d{1,2}\/\d{4}/.test(dateString)) {
+      // Try parsing as-is only for ISO date format
+      if (/^\d{4}-\d{2}-\d{2}/.test(dateString)) {
         parsedDate = new Date(dateString);
       } else {
-        return null;
+        // For any other format, including DD.MM.YYYY that might have been missed,
+        // try to parse it as DD.MM.YYYY one more time
+        const dotParts = dateString.split('.');
+        if (dotParts.length === 3) {
+          const day = parseInt(dotParts[0]);
+          const month = parseInt(dotParts[1]);
+          const year = parseInt(dotParts[2]);
+          
+          if (isNaN(day) || isNaN(month) || isNaN(year) ||
+              day < 1 || day > 31 || 
+              month < 1 || month > 12 ||
+              year < 1900 || year > 2100) {
+            return null;
+          }
+          
+          parsedDate = new Date(year, month - 1, day);
+          
+          if (parsedDate.getDate() !== day || 
+              parsedDate.getMonth() !== month - 1 || 
+              parsedDate.getFullYear() !== year) {
+            return null;
+          }
+        } else {
+          return null;
+        }
       }
     }
 

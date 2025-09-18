@@ -354,13 +354,15 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                     this.logger.warn(`Invalid date components: day=${day}, month=${month}, year=${year} from "${dateString}"`);
                     return null;
                 }
-                parsedDate = new Date(year, month - 1, day);
-                if (parsedDate.getDate() !== day ||
-                    parsedDate.getMonth() !== month - 1 ||
-                    parsedDate.getFullYear() !== year) {
-                    this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${parsedDate.getDate()}/${parsedDate.getMonth() + 1}/${parsedDate.getFullYear()}`);
+                parsedDate = new Date(Date.UTC(year, month - 1, day));
+                const createdDay = parsedDate.getUTCDate();
+                const createdMonth = parsedDate.getUTCMonth() + 1;
+                const createdYear = parsedDate.getUTCFullYear();
+                if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+                    this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${createdDay}/${createdMonth}/${createdYear}`);
                     return null;
                 }
+                this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
             }
             else {
                 this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
@@ -382,10 +384,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                     year < 1900 || year > 2100) {
                     return null;
                 }
-                parsedDate = new Date(year, month - 1, day);
-                if (parsedDate.getDate() !== day ||
-                    parsedDate.getMonth() !== month - 1 ||
-                    parsedDate.getFullYear() !== year) {
+                parsedDate = new Date(Date.UTC(year, month - 1, day));
+                const createdDay = parsedDate.getUTCDate();
+                const createdMonth = parsedDate.getUTCMonth() + 1;
+                const createdYear = parsedDate.getUTCFullYear();
+                if (createdDay !== day || createdMonth !== month || createdYear !== year) {
                     return null;
                 }
             }
@@ -402,10 +405,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                 if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1900 || year > 2100) {
                     return null;
                 }
-                parsedDate = new Date(year, month - 1, day);
-                if (parsedDate.getDate() !== day ||
-                    parsedDate.getMonth() !== month - 1 ||
-                    parsedDate.getFullYear() !== year) {
+                parsedDate = new Date(Date.UTC(year, month - 1, day));
+                const createdDay = parsedDate.getUTCDate();
+                const createdMonth = parsedDate.getUTCMonth() + 1;
+                const createdYear = parsedDate.getUTCFullYear();
+                if (createdDay !== day || createdMonth !== month || createdYear !== year) {
                     return null;
                 }
             }
@@ -429,10 +433,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                         year < 1900 || year > 2100) {
                         return null;
                     }
-                    parsedDate = new Date(year, month - 1, day);
-                    if (parsedDate.getDate() !== day ||
-                        parsedDate.getMonth() !== month - 1 ||
-                        parsedDate.getFullYear() !== year) {
+                    parsedDate = new Date(Date.UTC(year, month - 1, day));
+                    const createdDay = parsedDate.getUTCDate();
+                    const createdMonth = parsedDate.getUTCMonth() + 1;
+                    const createdYear = parsedDate.getUTCFullYear();
+                    if (createdDay !== day || createdMonth !== month || createdYear !== year) {
                         return null;
                     }
                 }
@@ -446,12 +451,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
             return null;
         }
         const currentYear = new Date().getFullYear();
-        const dateYear = parsedDate.getFullYear();
+        const dateYear = parsedDate.getUTCFullYear();
         if (dateYear < 2020 || dateYear > currentYear + 1) {
             this.logger.warn(`Date year out of range for "${dateString}": ${dateYear} (expected 2020-${currentYear + 1})`);
             return null;
         }
-        this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
         return parsedDate;
     }
     parseDate(dateString) {
@@ -470,10 +474,11 @@ let FileParsingProcessor = FileParsingProcessor_1 = class FileParsingProcessor {
                 year < 2020 || year > 2030) {
                 return null;
             }
-            const date = new Date(year, month - 1, day);
-            if (date.getDate() !== day ||
-                date.getMonth() !== month - 1 ||
-                date.getFullYear() !== year) {
+            const date = new Date(Date.UTC(year, month - 1, day));
+            const createdDay = date.getUTCDate();
+            const createdMonth = date.getUTCMonth() + 1;
+            const createdYear = date.getUTCFullYear();
+            if (createdDay !== day || createdMonth !== month || createdYear !== year) {
                 return null;
             }
             return date;

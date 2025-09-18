@@ -472,15 +472,21 @@ export class FileParsingProcessor {
           return null;
         }
         
-        parsedDate = new Date(year, month - 1, day); // Month is 0-indexed
+        // Create date with explicit validation - use UTC to avoid timezone issues
+        parsedDate = new Date(Date.UTC(year, month - 1, day)); // Month is 0-indexed
         
-        // Check if the date rolled over (e.g., 32.01.2025 becomes 01.02.2025)
-        if (parsedDate.getDate() !== day || 
-            parsedDate.getMonth() !== month - 1 || 
-            parsedDate.getFullYear() !== year) {
-          this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${parsedDate.getDate()}/${parsedDate.getMonth() + 1}/${parsedDate.getFullYear()}`);
+        // Additional validation: check if the created date components match input
+        // Use UTC methods to avoid timezone confusion
+        const createdDay = parsedDate.getUTCDate();
+        const createdMonth = parsedDate.getUTCMonth() + 1; // Convert back to 1-indexed
+        const createdYear = parsedDate.getUTCFullYear();
+        
+        if (createdDay !== day || createdMonth !== month || createdYear !== year) {
+          this.logger.warn(`Date rollover detected for "${dateString}": expected ${day}/${month}/${year}, got ${createdDay}/${createdMonth}/${createdYear}`);
           return null;
         }
+        
+        this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
       } else {
         // Fallback for malformed dot-separated dates
         this.logger.warn(`Malformed dot-separated date: "${dateString}" (${parts.length} parts)`);
@@ -505,11 +511,15 @@ export class FileParsingProcessor {
           return null;
         }
         
-        parsedDate = new Date(year, month - 1, day);
+        // Use UTC to avoid timezone issues
+        parsedDate = new Date(Date.UTC(year, month - 1, day));
         
-        if (parsedDate.getDate() !== day || 
-            parsedDate.getMonth() !== month - 1 || 
-            parsedDate.getFullYear() !== year) {
+        // Validate using UTC methods
+        const createdDay = parsedDate.getUTCDate();
+        const createdMonth = parsedDate.getUTCMonth() + 1;
+        const createdYear = parsedDate.getUTCFullYear();
+        
+        if (createdDay !== day || createdMonth !== month || createdYear !== year) {
           return null;
         }
       } else {
@@ -527,11 +537,15 @@ export class FileParsingProcessor {
           return null;
         }
         
-        parsedDate = new Date(year, month - 1, day);
+        // Use UTC to avoid timezone issues
+        parsedDate = new Date(Date.UTC(year, month - 1, day));
         
-        if (parsedDate.getDate() !== day || 
-            parsedDate.getMonth() !== month - 1 || 
-            parsedDate.getFullYear() !== year) {
+        // Validate using UTC methods
+        const createdDay = parsedDate.getUTCDate();
+        const createdMonth = parsedDate.getUTCMonth() + 1;
+        const createdYear = parsedDate.getUTCFullYear();
+        
+        if (createdDay !== day || createdMonth !== month || createdYear !== year) {
           return null;
         }
       } else {
@@ -557,11 +571,15 @@ export class FileParsingProcessor {
             return null;
           }
           
-          parsedDate = new Date(year, month - 1, day);
+          // Use UTC to avoid timezone issues
+          parsedDate = new Date(Date.UTC(year, month - 1, day));
           
-          if (parsedDate.getDate() !== day || 
-              parsedDate.getMonth() !== month - 1 || 
-              parsedDate.getFullYear() !== year) {
+          // Validate using UTC methods
+          const createdDay = parsedDate.getUTCDate();
+          const createdMonth = parsedDate.getUTCMonth() + 1;
+          const createdYear = parsedDate.getUTCFullYear();
+          
+          if (createdDay !== day || createdMonth !== month || createdYear !== year) {
             return null;
           }
         } else {
@@ -578,14 +596,13 @@ export class FileParsingProcessor {
 
     // Additional validation: check if date is reasonable (not too far in past/future)
     const currentYear = new Date().getFullYear();
-    const dateYear = parsedDate.getFullYear();
+    const dateYear = parsedDate.getUTCFullYear();
     
     if (dateYear < 2020 || dateYear > currentYear + 1) {
       this.logger.warn(`Date year out of range for "${dateString}": ${dateYear} (expected 2020-${currentYear + 1})`);
       return null;
     }
 
-    this.logger.debug(`Successfully parsed date "${dateString}" -> ${parsedDate.toISOString()}`);
     return parsedDate;
   }
 
@@ -617,12 +634,15 @@ export class FileParsingProcessor {
         return null;
       }
       
-      const date = new Date(year, month - 1, day);
+      // Use UTC to avoid timezone issues
+      const date = new Date(Date.UTC(year, month - 1, day));
       
-      // Verify the date didn't roll over
-      if (date.getDate() !== day || 
-          date.getMonth() !== month - 1 || 
-          date.getFullYear() !== year) {
+      // Verify the date didn't roll over using UTC methods
+      const createdDay = date.getUTCDate();
+      const createdMonth = date.getUTCMonth() + 1;
+      const createdYear = date.getUTCFullYear();
+      
+      if (createdDay !== day || createdMonth !== month || createdYear !== year) {
         return null;
       }
       

@@ -26,10 +26,10 @@ export declare class UploadsController {
         salesData: {
             id: string;
             profitMargin: number;
-            saleDate: Date;
             reportId: string;
             sku: string;
             productName: string;
+            saleDate: Date;
             quantity: number;
             price: number;
             revenue: number;

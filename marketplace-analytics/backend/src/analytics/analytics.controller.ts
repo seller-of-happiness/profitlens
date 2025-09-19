@@ -1,5 +1,5 @@
-import { Controller, Get, Delete, Param, Query, UseGuards, Request } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { Controller, Get, Delete, Param, Query, UseGuards, Request, Put, Body } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery, ApiBody } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 
@@ -30,6 +30,52 @@ export class AnalyticsController {
     @Request() req,
   ) {
     return this.analyticsService.getReportAnalytics(reportId, req.user.id);
+  }
+
+  @Get('reports')
+  @ApiOperation({ summary: 'Получить список всех отчетов пользователя' })
+  @ApiResponse({ status: 200, description: 'Список отчетов' })
+  async getUserReports(@Request() req) {
+    return this.analyticsService.getUserReports(req.user.id);
+  }
+
+  @Put('report/:id')
+  @ApiOperation({ summary: 'Обновить отчет (переименовать)' })
+  @ApiBody({ 
+    schema: { 
+      type: 'object', 
+      properties: { 
+        fileName: { type: 'string', description: 'Новое имя файла' } 
+      },
+      required: ['fileName']
+    } 
+  })
+  @ApiResponse({ status: 200, description: 'Отчет обновлен' })
+  @ApiResponse({ status: 404, description: 'Отчет не найден' })
+  async updateReport(
+    @Param('id') reportId: string,
+    @Body('fileName') fileName: string,
+    @Request() req,
+  ) {
+    return this.analyticsService.updateReport(reportId, req.user.id, fileName);
+  }
+
+  @Delete('report/:id')
+  @ApiOperation({ summary: 'Удалить конкретный отчет' })
+  @ApiResponse({ status: 200, description: 'Отчет удален' })
+  @ApiResponse({ status: 404, description: 'Отчет не найден' })
+  async deleteReport(
+    @Param('id') reportId: string,
+    @Request() req,
+  ) {
+    return this.analyticsService.deleteReport(reportId, req.user.id);
+  }
+
+  @Delete('reports/all')
+  @ApiOperation({ summary: 'Удалить все отчеты пользователя' })
+  @ApiResponse({ status: 200, description: 'Все отчеты удалены' })
+  async deleteAllReports(@Request() req) {
+    return this.analyticsService.deleteAllReports(req.user.id);
   }
 
   @Delete('clear')

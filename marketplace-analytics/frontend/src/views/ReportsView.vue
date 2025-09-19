@@ -166,9 +166,9 @@
                 <BaseButton
                   variant="outline"
                   size="sm"
-                  :icon="ArrowUpTrayIcon"
-                  @click="openReplaceDialog(report)"
-                  title="Заменить"
+                  :icon="PencilIcon"
+                  @click="openRenameDialog(report)"
+                  title="Переименовать"
                 />
                 <BaseButton
                   variant="danger"
@@ -185,7 +185,7 @@
               <div class="grid grid-cols-2 gap-4 text-sm">
                 <div>
                   <div class="text-gray-500">Записей</div>
-                  <div class="font-medium">{{ report._count?.salesData || 0 }}</div>
+                  <div class="font-medium">{{ report.salesCount || 0 }}</div>
                 </div>
                 <div>
                   <div class="text-gray-500">Статус</div>
@@ -269,79 +269,47 @@
     </div>
   </div>
 
-  <!-- Replace Report Modal -->
+  <!-- Rename Report Modal -->
   <BaseModal 
-    v-model="showReplaceModal" 
-    title="Заменить отчет"
+    v-model="showRenameModal" 
+    title="Переименовать отчет"
     size="md"
   >
     <div class="space-y-4">
       <div>
         <p class="text-sm text-gray-600 mb-4">
-          Заменить отчет "{{ selectedReport?.fileName }}" новым файлом?
+          Переименовать отчет "{{ selectedReport?.fileName }}"
         </p>
         
         <div>
-          <label class="form-label">Маркетплейс</label>
-          <div class="mt-2 space-y-2">
-            <div class="flex items-center">
-              <input
-                id="replace-wildberries"
-                v-model="replaceMarketplace"
-                name="marketplace"
-                type="radio"
-                value="WILDBERRIES"
-                class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
-              />
-              <label for="replace-wildberries" class="ml-3 block text-sm font-medium text-gray-700">
-                Wildberries
-              </label>
-            </div>
-            <div class="flex items-center">
-              <input
-                id="replace-ozon"
-                v-model="replaceMarketplace"
-                name="marketplace"
-                type="radio"
-                value="OZON"
-                class="h-4 w-4 text-primary-600 focus:ring-primary-500 border-gray-300"
-              />
-              <label for="replace-ozon" class="ml-3 block text-sm font-medium text-gray-700">
-                Ozon
-              </label>
-            </div>
-          </div>
-        </div>
-
-        <div class="mt-4">
-          <label class="form-label">Новый файл</label>
-          <FileUpload
-            ref="replaceFileUploadRef"
-            accept=".xlsx,.xls,.csv"
-            :max-size="52428800"
-            @files-selected="onReplaceFilesSelected"
-            @error="onReplaceError"
+          <label class="form-label">Новое название</label>
+          <input
+            v-model="newFileName"
+            type="text"
+            class="form-input mt-1"
+            placeholder="Введите новое название файла"
+            @keyup.enter="handleRename"
           />
         </div>
         
-        <div v-if="replaceError" class="mt-2 text-sm text-red-600">
-          {{ replaceError }}
+        <div v-if="renameError" class="mt-2 text-sm text-red-600">
+          {{ renameError }}
         </div>
       </div>
     </div>
     
     <template #footer>
       <div class="flex justify-end space-x-3">
-        <BaseButton variant="outline" @click="closeReplaceDialog">
+        <BaseButton variant="outline" @click="closeRenameDialog">
           Отмена
         </BaseButton>
         <BaseButton 
           variant="primary" 
-          @click="handleReplace"
-          :loading="replacing"
-          :disabled="!canReplace"
+          @click="handleRename"
+          :loading="renaming"
+          :disabled="!newFileName.trim() || renaming"
         >
-          Заменить
+          Переименовать
         </BaseButton>
       </div>
     </template>
@@ -392,7 +360,7 @@ import {
   TrashIcon,
   ArrowPathIcon,
   EyeIcon,
-  ArrowUpTrayIcon,
+  PencilIcon,
   CloudArrowUpIcon,
   MagnifyingGlassIcon,
   ExclamationTriangleIcon,
@@ -414,13 +382,11 @@ const filters = ref({
 })
 const searchQuery = ref('')
 
-// Replace modal
-const showReplaceModal = ref(false)
-const replaceMarketplace = ref<Marketplace | ''>('')
-const replaceFiles = ref<File[]>([])
-const replaceError = ref('')
-const replacing = ref(false)
-const replaceFileUploadRef = ref()
+// Rename modal
+const showRenameModal = ref(false)
+const newFileName = ref('')
+const renameError = ref('')
+const renaming = ref(false)
 
 // Confirmation modals
 const showDeleteConfirm = ref(false)
@@ -466,22 +432,19 @@ const processingReportsCount = computed(() => {
 })
 
 const totalSalesRecords = computed(() => {
-  return filteredReports.value.reduce((sum, report) => sum + (report._count?.salesData || 0), 0)
+  return filteredReports.value.reduce((sum, report) => sum + (report.salesCount || 0), 0)
 })
 
 const totalRevenue = computed(() => {
   return filteredReports.value.reduce((sum, report) => sum + (report.totalRevenue || 0), 0)
 })
 
-const canReplace = computed(() => {
-  return replaceMarketplace.value && replaceFiles.value.length > 0 && !replacing.value
-})
 
 // Methods
 const loadReports = async () => {
   try {
     loading.value = true
-    reports.value = await uploadsService.getReports()
+    reports.value = await analyticsService.getUserReports()
   } catch (error) {
     console.error('Error loading reports:', error)
   } finally {
@@ -548,7 +511,7 @@ const handleDelete = async () => {
   if (!selectedReport.value) return
 
   try {
-    await uploadsService.deleteReport(selectedReport.value.id)
+    await analyticsService.deleteReport(selectedReport.value.id)
     await loadReports()
     showDeleteConfirm.value = false
     showSuccess('Отчет удален', `Отчет "${selectedReport.value.fileName}" успешно удален`)
@@ -561,7 +524,7 @@ const handleDelete = async () => {
 
 const handleDeleteAll = async () => {
   try {
-    const result = await uploadsService.deleteAllReports()
+    const result = await analyticsService.deleteAllReports()
     await loadReports()
     showDeleteAllConfirm.value = false
     showSuccess('Все отчеты удалены', 'Все отчеты были успешно удалены')
@@ -594,56 +557,38 @@ const handleResetStatistics = async () => {
   }
 }
 
-// Replace operations
-const openReplaceDialog = (report: Report) => {
+// Rename operations
+const openRenameDialog = (report: Report) => {
   selectedReport.value = report
-  replaceMarketplace.value = report.marketplace as Marketplace
-  replaceFiles.value = []
-  replaceError.value = ''
-  showReplaceModal.value = true
+  newFileName.value = report.fileName
+  renameError.value = ''
+  showRenameModal.value = true
 }
 
-const closeReplaceDialog = () => {
-  showReplaceModal.value = false
+const closeRenameDialog = () => {
+  showRenameModal.value = false
   selectedReport.value = null
-  replaceMarketplace.value = ''
-  replaceFiles.value = []
-  replaceError.value = ''
-  if (replaceFileUploadRef.value) {
-    replaceFileUploadRef.value.clearFiles()
-  }
+  newFileName.value = ''
+  renameError.value = ''
 }
 
-const onReplaceFilesSelected = (files: File[]) => {
-  replaceFiles.value = files
-  replaceError.value = ''
-}
-
-const onReplaceError = (message: string) => {
-  replaceError.value = message
-}
-
-const handleReplace = async () => {
-  if (!canReplace.value || !selectedReport.value) return
+const handleRename = async () => {
+  if (!selectedReport.value || !newFileName.value.trim()) return
 
   try {
-    replacing.value = true
-    replaceError.value = ''
+    renaming.value = true
+    renameError.value = ''
 
-    await uploadsService.replaceReport(
-      selectedReport.value.id,
-      replaceFiles.value[0],
-      replaceMarketplace.value as Marketplace
-    )
+    await analyticsService.updateReport(selectedReport.value.id, newFileName.value.trim())
 
     await loadReports()
-    closeReplaceDialog()
-    showSuccess('Отчет заменен', `Файл "${selectedReport.value.fileName}" успешно заменен`)
+    closeRenameDialog()
+    showSuccess('Отчет переименован', `Отчет успешно переименован в "${newFileName.value}"`)
   } catch (err: any) {
-    replaceError.value = err.response?.data?.message || 'Произошла ошибка при замене файла'
-    showError('Ошибка замены', replaceError.value)
+    renameError.value = err.response?.data?.message || 'Произошла ошибка при переименовании'
+    showError('Ошибка переименования', renameError.value)
   } finally {
-    replacing.value = false
+    renaming.value = false
   }
 }
 

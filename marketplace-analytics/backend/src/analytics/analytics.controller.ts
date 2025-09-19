@@ -1,4 +1,4 @@
-import { Controller, Get, Param, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Delete, Param, Query, UseGuards, Request } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { AnalyticsService } from './analytics.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -30,5 +30,12 @@ export class AnalyticsController {
     @Request() req,
   ) {
     return this.analyticsService.getReportAnalytics(reportId, req.user.id);
+  }
+
+  @Delete('clear')
+  @ApiOperation({ summary: 'Очистить всю статистику пользователя' })
+  @ApiResponse({ status: 200, description: 'Статистика очищена' })
+  async clearUserStatistics(@Request() req) {
+    return this.analyticsService.clearUserStatistics(req.user.id);
   }
 }

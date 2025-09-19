@@ -13,6 +13,8 @@ exports.AnalyticsService = void 0;
 const common_1 = require("@nestjs/common");
 const prisma_service_1 = require("../prisma/prisma.service");
 const constants_1 = require("../common/constants");
+const path = require("path");
+const fs = require("fs");
 let AnalyticsService = class AnalyticsService {
     constructor(prisma) {
         this.prisma = prisma;
@@ -269,6 +271,45 @@ let AnalyticsService = class AnalyticsService {
             topProducts,
             dailySales,
             expenseBreakdown,
+        };
+    }
+    async clearUserStatistics(userId) {
+        const reports = await this.prisma.report.findMany({
+            where: { userId },
+        });
+        if (reports.length === 0) {
+            return {
+                message: 'Нет данных для удаления',
+                deletedReports: 0,
+                deletedSalesData: 0
+            };
+        }
+        const uploadDir = process.env.UPLOAD_DEST || './uploads';
+        reports.forEach((report) => {
+            const filePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+            if (fs.existsSync(filePath)) {
+                try {
+                    fs.unlinkSync(filePath);
+                }
+                catch (error) {
+                    console.error(`Ошибка при удалении файла ${filePath}:`, error);
+                }
+            }
+        });
+        const salesDataCount = await this.prisma.salesData.count({
+            where: {
+                report: {
+                    userId,
+                },
+            },
+        });
+        await this.prisma.report.deleteMany({
+            where: { userId },
+        });
+        return {
+            message: `Вся статистика очищена. Удалено отчетов: ${reports.length}, записей данных: ${salesDataCount}`,
+            deletedReports: reports.length,
+            deletedSalesData: salesDataCount,
         };
     }
 };

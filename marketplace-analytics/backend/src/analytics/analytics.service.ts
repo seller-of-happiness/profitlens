@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { Marketplace } from '../common/constants';
+import * as path from 'path';
+import * as fs from 'fs';
 
 interface ParsedSalesRow {
   sku: string;
@@ -325,6 +327,54 @@ export class AnalyticsService {
       topProducts,
       dailySales,
       expenseBreakdown,
+    };
+  }
+
+  async clearUserStatistics(userId: string) {
+    // Получаем все отчеты пользователя для удаления файлов
+    const reports = await this.prisma.report.findMany({
+      where: { userId },
+    });
+
+    if (reports.length === 0) {
+      return { 
+        message: 'Нет данных для удаления', 
+        deletedReports: 0,
+        deletedSalesData: 0 
+      };
+    }
+
+    // Удаляем все файлы отчетов
+    const uploadDir = process.env.UPLOAD_DEST || './uploads';
+    reports.forEach((report) => {
+      const filePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (error) {
+          console.error(`Ошибка при удалении файла ${filePath}:`, error);
+        }
+      }
+    });
+
+    // Подсчитываем количество записей данных продаж
+    const salesDataCount = await this.prisma.salesData.count({
+      where: {
+        report: {
+          userId,
+        },
+      },
+    });
+
+    // Удаляем все отчеты пользователя (каскадное удаление удалит и salesData)
+    await this.prisma.report.deleteMany({
+      where: { userId },
+    });
+
+    return {
+      message: `Вся статистика очищена. Удалено отчетов: ${reports.length}, записей данных: ${salesDataCount}`,
+      deletedReports: reports.length,
+      deletedSalesData: salesDataCount,
     };
   }
 }

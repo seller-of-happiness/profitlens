@@ -20,7 +20,16 @@
             @click="confirmDeleteAll"
             :disabled="reports.length === 0"
           >
-            Очистить все
+            Удалить все отчеты
+          </BaseButton>
+          <BaseButton
+            variant="danger"
+            size="sm"
+            :icon="ExclamationTriangleIcon"
+            @click="confirmClearStatistics"
+            :disabled="reports.length === 0"
+          >
+            Сбросить статистику
           </BaseButton>
         </div>
       </div>
@@ -50,16 +59,30 @@
                   :class="report.processed ? 'text-green-500' : 'text-yellow-500'"
                 />
               </div>
-              <div>
+              <div class="flex-1">
                 <h4 class="text-sm font-medium text-gray-900">{{ report.fileName }}</h4>
-                <div class="flex items-center space-x-4 text-xs text-gray-500">
-                  <span>{{ formatMarketplace(report.marketplace) }}</span>
+                <div class="flex items-center space-x-4 text-xs text-gray-500 mt-1">
+                  <span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium"
+                        :class="getMarketplaceClass(report.marketplace)">
+                    {{ formatMarketplace(report.marketplace) }}
+                  </span>
                   <span>{{ formatDate(report.uploadDate) }}</span>
-                  <span v-if="report._count?.salesData" class="text-green-600">
+                  <span v-if="report._count?.salesData" class="text-green-600 font-medium">
                     {{ report._count.salesData }} записей
                   </span>
-                  <span v-if="!report.processed" class="text-yellow-600">
+                  <span v-if="!report.processed" class="text-yellow-600 font-medium">
                     Обрабатывается...
+                  </span>
+                </div>
+                <div v-if="report.totalRevenue || report.totalProfit" class="flex items-center space-x-4 text-xs text-gray-600 mt-1">
+                  <span v-if="report.totalRevenue" class="text-blue-600">
+                    Выручка: ₽{{ formatCurrency(report.totalRevenue) }}
+                  </span>
+                  <span v-if="report.totalProfit" class="text-green-600">
+                    Прибыль: ₽{{ formatCurrency(report.totalProfit) }}
+                  </span>
+                  <span v-if="report.profitMargin" class="text-purple-600">
+                    Маржа: {{ report.profitMargin.toFixed(1) }}%
                   </span>
                 </div>
               </div>
@@ -190,11 +213,21 @@
     confirm-variant="danger"
     @confirm="handleDeleteAll"
   />
+
+  <ConfirmationModal
+    v-model="showClearStatsConfirm"
+    title="Сбросить всю статистику"
+    message="Вы уверены, что хотите сбросить ВСЮ статистику? Это действие удалит все отчеты, данные продаж и файлы. Восстановить данные будет невозможно."
+    confirm-text="Сбросить статистику"
+    confirm-variant="danger"
+    @confirm="handleClearStatistics"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { uploadsService } from '@/services/uploads'
+import { analyticsService } from '@/services/analytics'
 import type { Report, Marketplace } from '@shared/types'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
@@ -207,6 +240,7 @@ import {
   ArrowPathIcon,
   EyeIcon,
   ArrowUpTrayIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 
 // Props and emits
@@ -228,6 +262,7 @@ const replaceFileUploadRef = ref()
 // Confirmation modals
 const showDeleteConfirm = ref(false)
 const showDeleteAllConfirm = ref(false)
+const showClearStatsConfirm = ref(false)
 
 // Computed
 const canReplace = computed(() => {
@@ -261,6 +296,16 @@ const formatDate = (date: Date | string) => {
   })
 }
 
+const formatCurrency = (amount: number) => {
+  return new Intl.NumberFormat('ru-RU').format(Math.round(amount))
+}
+
+const getMarketplaceClass = (marketplace: string) => {
+  return marketplace === 'WILDBERRIES' 
+    ? 'bg-purple-100 text-purple-800' 
+    : 'bg-blue-100 text-blue-800'
+}
+
 // Delete operations
 const confirmDelete = (report: Report) => {
   selectedReport.value = report
@@ -269,6 +314,10 @@ const confirmDelete = (report: Report) => {
 
 const confirmDeleteAll = () => {
   showDeleteAllConfirm.value = true
+}
+
+const confirmClearStatistics = () => {
+  showClearStatsConfirm.value = true
 }
 
 const handleDelete = async () => {
@@ -291,6 +340,18 @@ const handleDeleteAll = async () => {
     showDeleteAllConfirm.value = false
   } catch (error) {
     console.error('Error deleting all reports:', error)
+  }
+}
+
+const handleClearStatistics = async () => {
+  try {
+    const result = await analyticsService.clearStatistics()
+    console.log('Statistics cleared:', result)
+    await loadReports()
+    showClearStatsConfirm.value = false
+    // Можно добавить уведомление пользователю о результате
+  } catch (error) {
+    console.error('Error clearing statistics:', error)
   }
 }
 

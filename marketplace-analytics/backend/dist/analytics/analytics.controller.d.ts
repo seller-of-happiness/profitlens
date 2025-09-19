@@ -30,4 +30,9 @@ export declare class AnalyticsController {
             returns: number;
         };
     }>;
+    clearUserStatistics(req: any): Promise<{
+        message: string;
+        deletedReports: number;
+        deletedSalesData: number;
+    }>;
 }

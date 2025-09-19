@@ -10,6 +10,10 @@ class AnalyticsService {
   async getReportAnalytics(reportId: string): Promise<AnalyticsData> {
     return apiService.get<AnalyticsData>(`/analytics/report/${reportId}`)
   }
+
+  async clearStatistics(): Promise<{ message: string; deletedReports: number; deletedSalesData: number }> {
+    return apiService.delete('/analytics/clear')
+  }
 }
 
 export const analyticsService = new AnalyticsService()

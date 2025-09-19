@@ -53,5 +53,10 @@ export declare class AnalyticsService {
             returns: number;
         };
     }>;
+    clearUserStatistics(userId: string): Promise<{
+        message: string;
+        deletedReports: number;
+        deletedSalesData: number;
+    }>;
 }
 export {};

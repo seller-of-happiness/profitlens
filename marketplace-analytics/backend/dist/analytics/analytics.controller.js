@@ -27,6 +27,9 @@ let AnalyticsController = class AnalyticsController {
     async getReportAnalytics(reportId, req) {
         return this.analyticsService.getReportAnalytics(reportId, req.user.id);
     }
+    async clearUserStatistics(req) {
+        return this.analyticsService.clearUserStatistics(req.user.id);
+    }
 };
 exports.AnalyticsController = AnalyticsController;
 __decorate([
@@ -51,6 +54,15 @@ __decorate([
     __metadata("design:paramtypes", [String, Object]),
     __metadata("design:returntype", Promise)
 ], AnalyticsController.prototype, "getReportAnalytics", null);
+__decorate([
+    (0, common_1.Delete)('clear'),
+    (0, swagger_1.ApiOperation)({ summary: 'Очистить всю статистику пользователя' }),
+    (0, swagger_1.ApiResponse)({ status: 200, description: 'Статистика очищена' }),
+    __param(0, (0, common_1.Request)()),
+    __metadata("design:type", Function),
+    __metadata("design:paramtypes", [Object]),
+    __metadata("design:returntype", Promise)
+], AnalyticsController.prototype, "clearUserStatistics", null);
 exports.AnalyticsController = AnalyticsController = __decorate([
     (0, swagger_1.ApiTags)('Analytics'),
     (0, common_1.Controller)('analytics'),

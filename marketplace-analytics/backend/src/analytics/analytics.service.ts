@@ -330,6 +330,155 @@ export class AnalyticsService {
     };
   }
 
+  async getUserReports(userId: string) {
+    const reports = await this.prisma.report.findMany({
+      where: { userId },
+      select: {
+        id: true,
+        fileName: true,
+        marketplace: true,
+        uploadDate: true,
+        processed: true,
+        totalRevenue: true,
+        totalProfit: true,
+        profitMargin: true,
+        _count: {
+          select: {
+            salesData: true,
+          },
+        },
+      },
+      orderBy: {
+        uploadDate: 'desc',
+      },
+    });
+
+    return reports.map(report => ({
+      ...report,
+      salesCount: report._count.salesData,
+      _count: undefined,
+    }));
+  }
+
+  async updateReport(reportId: string, userId: string, newFileName: string) {
+    const report = await this.prisma.report.findFirst({
+      where: { id: reportId, userId },
+    });
+
+    if (!report) {
+      throw new Error('Report not found');
+    }
+
+    // Переименовываем файл на диске
+    const uploadDir = process.env.UPLOAD_DEST || './uploads';
+    const oldFilePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+    const newFilePath = path.join(uploadDir, `${report.id}_${newFileName}`);
+
+    if (fs.existsSync(oldFilePath)) {
+      try {
+        fs.renameSync(oldFilePath, newFilePath);
+      } catch (error) {
+        console.error(`Ошибка при переименовании файла:`, error);
+        throw new Error('Не удалось переименовать файл');
+      }
+    }
+
+    // Обновляем запись в базе данных
+    const updatedReport = await this.prisma.report.update({
+      where: { id: reportId },
+      data: { fileName: newFileName },
+    });
+
+    return {
+      message: 'Отчет успешно переименован',
+      report: updatedReport,
+    };
+  }
+
+  async deleteReport(reportId: string, userId: string) {
+    const report = await this.prisma.report.findFirst({
+      where: { id: reportId, userId },
+    });
+
+    if (!report) {
+      throw new Error('Report not found');
+    }
+
+    // Удаляем файл с диска
+    const uploadDir = process.env.UPLOAD_DEST || './uploads';
+    const filePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+    
+    if (fs.existsSync(filePath)) {
+      try {
+        fs.unlinkSync(filePath);
+      } catch (error) {
+        console.error(`Ошибка при удалении файла ${filePath}:`, error);
+      }
+    }
+
+    // Подсчитываем количество записей данных продаж
+    const salesDataCount = await this.prisma.salesData.count({
+      where: { reportId },
+    });
+
+    // Удаляем отчет (каскадное удаление удалит и salesData)
+    await this.prisma.report.delete({
+      where: { id: reportId },
+    });
+
+    return {
+      message: `Отчет удален. Удалено записей данных: ${salesDataCount}`,
+      deletedSalesData: salesDataCount,
+    };
+  }
+
+  async deleteAllReports(userId: string) {
+    const reports = await this.prisma.report.findMany({
+      where: { userId },
+    });
+
+    if (reports.length === 0) {
+      return { 
+        message: 'Нет отчетов для удаления', 
+        deletedReports: 0,
+        deletedSalesData: 0 
+      };
+    }
+
+    // Удаляем все файлы отчетов
+    const uploadDir = process.env.UPLOAD_DEST || './uploads';
+    reports.forEach((report) => {
+      const filePath = path.join(uploadDir, `${report.id}_${report.fileName}`);
+      if (fs.existsSync(filePath)) {
+        try {
+          fs.unlinkSync(filePath);
+        } catch (error) {
+          console.error(`Ошибка при удалении файла ${filePath}:`, error);
+        }
+      }
+    });
+
+    // Подсчитываем количество записей данных продаж
+    const salesDataCount = await this.prisma.salesData.count({
+      where: {
+        report: {
+          userId,
+        },
+      },
+    });
+
+    // Удаляем все отчеты пользователя (каскадное удаление удалит и salesData)
+    await this.prisma.report.deleteMany({
+      where: { userId },
+    });
+
+    return {
+      message: `Все отчеты удалены. Удалено отчетов: ${reports.length}, записей данных: ${salesDataCount}`,
+      deletedReports: reports.length,
+      deletedSalesData: salesDataCount,
+    };
+  }
+
   async clearUserStatistics(userId: string) {
     // Получаем все отчеты пользователя для удаления файлов
     const reports = await this.prisma.report.findMany({

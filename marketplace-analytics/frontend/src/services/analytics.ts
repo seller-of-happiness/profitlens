@@ -11,6 +11,22 @@ class AnalyticsService {
     return apiService.get<AnalyticsData>(`/analytics/report/${reportId}`)
   }
 
+  async getUserReports(): Promise<any[]> {
+    return apiService.get('/analytics/reports')
+  }
+
+  async updateReport(reportId: string, fileName: string): Promise<{ message: string; report: any }> {
+    return apiService.put(`/analytics/report/${reportId}`, { fileName })
+  }
+
+  async deleteReport(reportId: string): Promise<{ message: string; deletedSalesData: number }> {
+    return apiService.delete(`/analytics/report/${reportId}`)
+  }
+
+  async deleteAllReports(): Promise<{ message: string; deletedReports: number; deletedSalesData: number }> {
+    return apiService.delete('/analytics/reports/all')
+  }
+
   async clearStatistics(): Promise<{ message: string; deletedReports: number; deletedSalesData: number }> {
     return apiService.delete('/analytics/clear')
   }

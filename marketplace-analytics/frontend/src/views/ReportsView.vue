@@ -33,6 +33,14 @@
           >
             Очистить все
           </BaseButton>
+          <BaseButton
+            variant="danger"
+            :icon="ExclamationTriangleIcon"
+            @click="confirmResetStatistics"
+            :disabled="reports.length === 0"
+          >
+            Сбросить статистику
+          </BaseButton>
         </div>
       </div>
     </div>
@@ -357,12 +365,23 @@
     confirm-variant="danger"
     @confirm="handleDeleteAll"
   />
+
+  <ConfirmationModal
+    v-model="showResetStatisticsConfirm"
+    title="Сбросить всю статистику"
+    message="Вы уверены, что хотите ПОЛНОСТЬЮ СБРОСИТЬ всю статистику? Это действие удалит ВСЕ отчеты и данные продаж безвозвратно!"
+    confirm-text="Сбросить статистику"
+    confirm-variant="danger"
+    @confirm="handleResetStatistics"
+  />
 </template>
 
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { uploadsService } from '@/services/uploads'
+import { analyticsService } from '@/services/analytics'
+import { useToast } from '@/composables/useToast'
 import type { Report, Marketplace } from '@shared/types'
 import BaseButton from '@/components/ui/BaseButton.vue'
 import BaseModal from '@/components/ui/BaseModal.vue'
@@ -376,10 +395,12 @@ import {
   ArrowUpTrayIcon,
   CloudArrowUpIcon,
   MagnifyingGlassIcon,
+  ExclamationTriangleIcon,
 } from '@heroicons/vue/24/outline'
 import { DocumentMagnifyingGlassIcon } from '@heroicons/vue/24/solid'
 
 const router = useRouter()
+const { showSuccess, showError } = useToast()
 
 // Reactive data
 const reports = ref<Report[]>([])
@@ -404,6 +425,7 @@ const replaceFileUploadRef = ref()
 // Confirmation modals
 const showDeleteConfirm = ref(false)
 const showDeleteAllConfirm = ref(false)
+const showResetStatisticsConfirm = ref(false)
 
 // Computed properties
 const hasFilters = computed(() => {
@@ -518,6 +540,10 @@ const confirmDeleteAll = () => {
   showDeleteAllConfirm.value = true
 }
 
+const confirmResetStatistics = () => {
+  showResetStatisticsConfirm.value = true
+}
+
 const handleDelete = async () => {
   if (!selectedReport.value) return
 
@@ -525,19 +551,46 @@ const handleDelete = async () => {
     await uploadsService.deleteReport(selectedReport.value.id)
     await loadReports()
     showDeleteConfirm.value = false
+    showSuccess('Отчет удален', `Отчет "${selectedReport.value.fileName}" успешно удален`)
     selectedReport.value = null
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error deleting report:', error)
+    showError('Ошибка удаления', error.response?.data?.message || 'Не удалось удалить отчет')
   }
 }
 
 const handleDeleteAll = async () => {
   try {
-    await uploadsService.deleteAllReports()
+    const result = await uploadsService.deleteAllReports()
     await loadReports()
     showDeleteAllConfirm.value = false
-  } catch (error) {
+    showSuccess('Все отчеты удалены', 'Все отчеты были успешно удалены')
+  } catch (error: any) {
     console.error('Error deleting all reports:', error)
+    showError('Ошибка удаления', error.response?.data?.message || 'Не удалось удалить отчеты')
+  }
+}
+
+const handleResetStatistics = async () => {
+  try {
+    const result = await analyticsService.clearStatistics()
+    console.log('Statistics reset:', result)
+    await loadReports()
+    showResetStatisticsConfirm.value = false
+    
+    showSuccess(
+      'Статистика сброшена', 
+      `Удалено отчетов: ${result.deletedReports}, записей продаж: ${result.deletedSalesData}`
+    )
+    
+    // Redirect to dashboard after a short delay
+    setTimeout(() => {
+      router.push('/dashboard')
+    }, 2000)
+  } catch (error: any) {
+    console.error('Error resetting statistics:', error)
+    showError('Ошибка сброса', error.response?.data?.message || 'Не удалось сбросить статистику')
+    showResetStatisticsConfirm.value = false
   }
 }
 
@@ -585,8 +638,10 @@ const handleReplace = async () => {
 
     await loadReports()
     closeReplaceDialog()
+    showSuccess('Отчет заменен', `Файл "${selectedReport.value.fileName}" успешно заменен`)
   } catch (err: any) {
     replaceError.value = err.response?.data?.message || 'Произошла ошибка при замене файла'
+    showError('Ошибка замены', replaceError.value)
   } finally {
     replacing.value = false
   }

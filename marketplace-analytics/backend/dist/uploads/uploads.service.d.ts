@@ -1,8 +1,10 @@
 import { PrismaService } from '../prisma/prisma.service';
+import { AnalyticsService } from '../analytics/analytics.service';
 import { Marketplace } from '../common/constants';
 export declare class UploadsService {
     private prisma;
-    constructor(prisma: PrismaService);
+    private analyticsService;
+    constructor(prisma: PrismaService, analyticsService: AnalyticsService);
     uploadFile(file: Express.Multer.File, userId: string, marketplace: Marketplace): Promise<{
         reportId: string;
         message: string;
@@ -26,10 +28,10 @@ export declare class UploadsService {
         salesData: {
             id: string;
             profitMargin: number;
-            saleDate: Date;
             reportId: string;
             sku: string;
             productName: string;
+            saleDate: Date;
             quantity: number;
             price: number;
             revenue: number;
@@ -61,4 +63,8 @@ export declare class UploadsService {
         message: string;
     }>;
     private validateFile;
+    private processFileSync;
+    private parseCsvFile;
+    private parseExcelFile;
+    private mapRowToSalesData;
 }

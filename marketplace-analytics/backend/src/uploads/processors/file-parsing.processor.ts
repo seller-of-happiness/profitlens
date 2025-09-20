@@ -671,30 +671,35 @@ export class FileParsingProcessor {
   }
 
   /**
-   * Pre-process CSV content to handle malformed data with mixed delimiters and embedded quotes
-   * This is a comprehensive fix for handling corrupted CSV files with:
-   * - Mixed delimiters (commas and tabs)
-   * - Unescaped quotes in product names
-   * - Jumbled field data
-   * - Merged rows in a single line
+   * Pre-process CSV content to handle only critical parsing issues
+   * This function now focuses on minimal intervention - PapaParse handles most cases well
+   * Only processes lines that are genuinely corrupted (mixed delimiters, merged rows)
    * @param csvContent - Raw CSV content
-   * @returns Processed CSV content with proper structure
+   * @returns Processed CSV content with minimal modifications
    */
   private preprocessCSVQuotes(csvContent: string): string {
-    const lines = csvContent.split('\n');
+    // Clean up basic encoding issues first
+    let cleanedContent = csvContent
+      .replace(/\0/g, '') // Remove null bytes
+      .replace(/\r\n/g, '\n') // Normalize line endings
+      .replace(/\r/g, '\n'); // Handle old Mac line endings
+
+    const lines = cleanedContent.split('\n');
     const processedLines: string[] = [];
     
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       
       if (i === 0) {
-        processedLines.push(line); // Header
+        processedLines.push(line); // Header - never modify
         continue;
       }
       
       if (!line.trim()) continue; // Skip empty lines
       
-      // Check if this line has severe corruption (mixed delimiters with product names and currency symbols)
+      // Only process lines that are genuinely corrupted
+      // Check for severe corruption: mixed delimiters AND currency symbols AND product names
+      // This indicates merged rows or severely malformed data
       if (this.isSeverelyCorruptedLine(line)) {
         this.logger.debug(`Processing severely corrupted line: "${line.substring(0, 100)}..."`);
         const reconstructedRows = this.reconstructSeverelyCorruptedLine(line);
@@ -704,21 +709,12 @@ export class FileParsingProcessor {
         }
       }
       
-      // Check for standard mixed delimiter issues
-      if (line.includes('\t') && line.includes(',')) {
-        this.logger.debug(`Processing line with mixed delimiters: "${line.substring(0, 100)}..."`);
-        const processedLine = this.reconstructMalformedCSVLine(line);
-        processedLines.push(processedLine);
-        continue;
-      }
-      
-      // Handle unescaped quotes in product names
-      let processedLine = this.fixUnescapedQuotes(line);
-      
-      // Ensure proper CSV structure
-      processedLine = this.ensureProperCSVStructure(processedLine);
-      
-      processedLines.push(processedLine);
+      // For all other cases, trust PapaParse to handle the CSV correctly
+      // PapaParse is excellent at handling:
+      // - Quoted fields with embedded quotes, commas, and special characters
+      // - Various quote escaping patterns
+      // - Mixed content in fields
+      processedLines.push(line);
     }
     
     return processedLines.join('\n');
@@ -726,12 +722,26 @@ export class FileParsingProcessor {
 
   /**
    * Check if a line is severely corrupted (contains merged rows with mixed data)
+   * This should only return true for lines that are genuinely broken beyond PapaParse's ability
    */
   private isSeverelyCorruptedLine(line: string): boolean {
-    return line.includes('\t') && 
-           line.includes(',') && 
-           line.includes('₽') && 
-           (line.includes('Книга') || line.includes('Фен') || line.includes('Видеокарта'));
+    // A line is severely corrupted if it has ALL of these indicators:
+    // 1. Mixed delimiters (tabs AND commas)
+    // 2. Currency symbols (indicating financial data)
+    // 3. Multiple dates (indicating merged rows)
+    // 4. Multiple long numeric sequences (indicating multiple SKUs)
+    
+    const hasTabsAndCommas = line.includes('\t') && line.includes(',');
+    const hasCurrencySymbols = line.includes('₽') || line.includes('%');
+    const dateMatches = (line.match(/\d{1,2}\.\d{1,2}\.\d{4}/g) || []).length;
+    const skuMatches = (line.match(/\d{8,10}/g) || []).length;
+    
+    // Only consider it severely corrupted if we have clear evidence of merged rows
+    return hasTabsAndCommas && 
+           hasCurrencySymbols && 
+           dateMatches >= 1 && 
+           skuMatches >= 2 &&
+           line.length > 200; // Long lines are more likely to be merged
   }
 
   /**
@@ -840,187 +850,6 @@ export class FileParsingProcessor {
     return results;
   }
 
-  /**
-   * Reconstruct malformed CSV lines with mixed delimiters
-   */
-  private reconstructMalformedCSVLine(line: string): string {
-    // Expected CSV structure for OZON: Дата,Артикул,Название товара,Цена за единицу,Количество,Выручка,Комиссия за продажу,Чистая прибыль
-    // Try to identify and extract the core fields using patterns
-    
-    // First, try to find a date pattern at the beginning
-    const dateMatch = line.match(/^(\d{1,2}\.\d{1,2}\.\d{4})/);
-    if (!dateMatch) {
-      // Try to find date pattern anywhere in the line
-      const anyDateMatch = line.match(/(\d{1,2}\.\d{1,2}\.\d{4})/);
-      if (anyDateMatch) {
-        const dateIndex = line.indexOf(anyDateMatch[1]);
-        line = line.substring(dateIndex); // Start from the date
-      } else {
-        // No valid date found, return as is
-        return line;
-      }
-    }
-    
-    // Split by various delimiters and try to reconstruct
-    let parts: string[];
-    
-    // Try splitting by tabs first (seems to be the primary issue)
-    if (line.includes('\t')) {
-      parts = line.split('\t');
-    } else {
-      parts = line.split(',');
-    }
-    
-    // Filter out empty parts and clean each part
-    parts = parts.map(part => part.trim()).filter(part => part.length > 0);
-    
-    // If we have too many parts, try to identify the core 8 fields we need
-    if (parts.length > 8) {
-      parts = this.extractCoreFields(parts);
-    }
-    
-    // Join with commas and ensure proper quoting
-    return parts.map(part => {
-      // If part contains commas or quotes, wrap in quotes
-      if (part.includes(',') || part.includes('"') || part.includes('\n')) {
-        // Escape existing quotes
-        const escaped = part.replace(/"/g, '""');
-        return `"${escaped}"`;
-      }
-      return part;
-    }).join(',');
-  }
-
-  /**
-   * Extract core fields from an over-parsed array
-   */
-  private extractCoreFields(parts: string[]): string[] {
-    const coreFields: string[] = [];
-    
-    // Field 1: Date (should be DD.MM.YYYY format)
-    const dateField = parts.find(part => /^\d{1,2}\.\d{1,2}\.\d{4}$/.test(part));
-    if (dateField) {
-      coreFields.push(dateField);
-    } else {
-      // Fallback: take first part if it looks date-like
-      coreFields.push(parts[0] || '');
-    }
-    
-    // Field 2: SKU (should be numeric, typically 8-10 digits)
-    const skuField = parts.find(part => /^\d{6,12}$/.test(part));
-    if (skuField) {
-      coreFields.push(skuField);
-    } else {
-      // Fallback: find any numeric field that could be SKU
-      const numericField = parts.find(part => /^\d+$/.test(part) && part.length >= 6);
-      coreFields.push(numericField || parts[1] || '');
-    }
-    
-    // Field 3: Product name (likely contains Cyrillic text)
-    const nameField = parts.find(part => 
-      /[а-яё]/i.test(part) && 
-      !part.includes('₽') && 
-      !part.includes('%') &&
-      !/^\d+$/.test(part) &&
-      !/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(part)
-    );
-    if (nameField) {
-      coreFields.push(nameField);
-    } else {
-      // Fallback
-      coreFields.push(parts[2] || '');
-    }
-    
-    // Fields 4-8: Numeric fields (price, quantity, revenue, commission, profit)
-    const numericFields = parts.filter(part => {
-      const cleaned = part.replace(/[₽\s,]/g, '');
-      return /^\d+(\.\d+)?$/.test(cleaned) && 
-             !coreFields.includes(part) && // Not already used
-             !/^\d{1,2}\.\d{1,2}\.\d{4}$/.test(part); // Not a date
-    });
-    
-    // Take up to 5 numeric fields
-    for (let i = 0; i < 5 && i < numericFields.length; i++) {
-      coreFields.push(numericFields[i].replace(/[₽\s]/g, '').replace(/,/g, ''));
-    }
-    
-    // Pad with empty strings if we don't have enough fields
-    while (coreFields.length < 8) {
-      coreFields.push('');
-    }
-    
-    return coreFields.slice(0, 8); // Ensure exactly 8 fields
-  }
-
-  /**
-   * Fix unescaped quotes in field values
-   */
-  private fixUnescapedQuotes(line: string): string {
-    // Handle product names with unescaped quotes like: Книга "Атомные привычки"
-    // This regex finds text that contains quotes but isn't properly quoted
-    
-    let processedLine = line;
-    
-    // Pattern to find unquoted text with embedded quotes
-    // Look for: word "quoted text" word (not wrapped in CSV quotes)
-    const unquotedWithQuotesPattern = /([^,"\s]+\s+"[^"]*"[^,]*)/g;
-    
-    let match;
-    while ((match = unquotedWithQuotesPattern.exec(line)) !== null) {
-      const originalText = match[1];
-      // Escape the quotes and wrap the entire field
-      const escapedText = originalText.replace(/"/g, '""');
-      const quotedText = `"${escapedText}"`;
-      processedLine = processedLine.replace(originalText, quotedText);
-    }
-    
-    return processedLine;
-  }
-
-  /**
-   * Ensure proper CSV structure with correct number of fields
-   */
-  private ensureProperCSVStructure(line: string): string {
-    const parts = line.split(',');
-    
-    // For OZON format, we expect 8 fields
-    const expectedFieldCount = 8;
-    
-    if (parts.length === expectedFieldCount) {
-      return line; // Already correct
-    }
-    
-    if (parts.length > expectedFieldCount) {
-      // Too many fields - try to merge some that might have been split incorrectly
-      const mergedParts: string[] = [];
-      let i = 0;
-      
-      while (i < parts.length && mergedParts.length < expectedFieldCount) {
-        let currentPart = parts[i];
-        
-        // If this part starts with a quote but doesn't end with one,
-        // it might be a split quoted field - merge with next parts
-        if (currentPart.startsWith('"') && !currentPart.endsWith('"')) {
-          while (i + 1 < parts.length && !currentPart.endsWith('"')) {
-            i++;
-            currentPart += ',' + parts[i];
-          }
-        }
-        
-        mergedParts.push(currentPart);
-        i++;
-      }
-      
-      // If we still have too many parts, just take the first expectedFieldCount
-      return mergedParts.slice(0, expectedFieldCount).join(',');
-    } else {
-      // Too few fields - pad with empty strings
-      while (parts.length < expectedFieldCount) {
-        parts.push('');
-      }
-      return parts.join(',');
-    }
-  }
 
   /**
    * Helper function to safely parse date from string with DD.MM.YYYY format

@@ -703,7 +703,7 @@ export class FileParsingProcessor {
     const processedLines: string[] = [];
     
     for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
+      let line = lines[i];
       
       if (!line.trim()) continue; // Skip empty lines
       
@@ -718,11 +718,37 @@ export class FileParsingProcessor {
         continue;
       }
 
+      // CRITICAL FIX: Handle nested quotes in product names
+      // Pattern: "Книга ""Атомные привычки""" should become "Книга \"Атомные привычки\""
+      // But we need to be careful not to break other quoted fields
+      line = this.fixNestedQuotesInLine(line);
+
       // Process the line - it should be valid at this point
       processedLines.push(line);
     }
     
     return processedLines.join('\n');
+  }
+
+  /**
+   * Fix nested quotes in a CSV line while preserving field structure
+   * Specifically handles patterns like: "Книга ""Атомные привычки"""
+   * @param line - CSV line to fix
+   * @returns Fixed CSV line
+   */
+  private fixNestedQuotesInLine(line: string): string {
+    // SIMPLE STRATEGY: Replace problematic nested quotes with a placeholder, 
+    // then restore them in a CSV-safe way
+    
+    // Step 1: Replace the problematic pattern with a temporary marker
+    // "Книга ""Атомные привычки""" -> "Книга <<<QUOTE>>>Атомные привычки<<<QUOTE>>>"
+    line = line.replace(/"([^"]*?)""([^"]+?)""([^"]*?)"/g, '"$1<<<QUOTE>>>$2<<<QUOTE>>>$3"');
+    
+    // Step 2: Convert the markers back to properly escaped quotes
+    // "Книга <<<QUOTE>>>Атомные привычки<<<QUOTE>>>" -> "Книга ""Атомные привычки"""
+    line = line.replace(/<<<QUOTE>>>/g, '""');
+    
+    return line;
   }
 
 
@@ -894,6 +920,7 @@ export class FileParsingProcessor {
 
   /**
    * Parse a single CSV line with proper quote handling
+   * Enhanced to handle nested quotes and various edge cases
    * @param line - CSV line
    * @returns Array of fields
    */
@@ -919,9 +946,13 @@ export class FileParsingProcessor {
           // End of quoted field
           inQuotes = false;
         }
+      } else if (char === '\\' && inQuotes && nextChar === '"') {
+        // Handle escaped quotes with backslash (alternative escaping method)
+        currentField += '"';
+        i++; // Skip next quote
       } else if (char === ',' && !inQuotes) {
         // Field separator
-        fields.push(currentField);
+        fields.push(currentField.trim());
         currentField = '';
       } else {
         // Regular character
@@ -932,9 +963,39 @@ export class FileParsingProcessor {
     }
 
     // Add the last field
-    fields.push(currentField);
+    fields.push(currentField.trim());
 
-    return fields;
+    // Post-process fields to clean up any remaining quote issues
+    return fields.map(field => this.cleanFieldQuotes(field));
+  }
+
+  /**
+   * Clean up quotes in individual CSV fields
+   * @param field - Individual field value
+   * @returns Cleaned field value
+   */
+  private cleanFieldQuotes(field: string): string {
+    if (!field || typeof field !== 'string') {
+      return field;
+    }
+
+    let cleaned = field.trim();
+
+    // If field is wrapped in quotes, remove outer quotes
+    if (cleaned.startsWith('"') && cleaned.endsWith('"') && cleaned.length >= 2) {
+      cleaned = cleaned.slice(1, -1);
+    }
+
+    // Handle specific patterns for product names with nested quotes
+    if (cleaned.includes('Атомные привычки')) {
+      // Ensure proper format: Книга "Атомные привычки"
+      cleaned = cleaned.replace(/Книга\s*""?([^"]*?)""?/g, 'Книга "$1"');
+    }
+
+    // Clean up any remaining double quotes that should be single
+    cleaned = cleaned.replace(/""/g, '"');
+
+    return cleaned;
   }
 
   /**

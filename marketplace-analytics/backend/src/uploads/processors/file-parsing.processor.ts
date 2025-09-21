@@ -43,8 +43,235 @@ class CSVParser {
     return semicolonCount > commaCount ? ";" : ",";
   }
 
+  private fixMultilineFields(csvContent: string, delimiter: string): string {
+    this.logger.debug("Fixing multiline fields and mixed data in CSV content");
+    
+    const lines = csvContent.split('\n');
+    const fixedLines: string[] = [];
+    let i = 0;
+    
+    while (i < lines.length) {
+      const line = lines[i];
+      
+      // Заголовок или пустая строка - пропускаем
+      if (i === 0 || !line.trim()) {
+        fixedLines.push(line);
+        i++;
+        continue;
+      }
+      
+      // Проверяем, содержит ли строка смешанные данные (несколько дат)
+      const dateMatches = line.match(/\d{2}\.\d{2}\.\d{4}/g);
+      
+      if (dateMatches && dateMatches.length > 1) {
+        this.logger.debug(`Found ${dateMatches.length} dates in line, splitting...`);
+        
+        // Разделяем смешанную строку на отдельные записи
+        const splitRows = this.splitMixedCSVLine(line, delimiter);
+        fixedLines.push(...splitRows);
+        
+        this.logger.debug(`Split line into ${splitRows.length} separate rows`);
+      } else {
+        // Обычная обработка - объединяем многострочные поля
+        let combinedLine = line;
+        let nextIndex = i + 1;
+        
+        while (nextIndex < lines.length && !this.isCompleteCSVLine(combinedLine, delimiter)) {
+          combinedLine += ' ' + lines[nextIndex].trim();
+          nextIndex++;
+        }
+        
+        // Очищаем название товара от артефактов
+        combinedLine = this.cleanProductNameField(combinedLine, delimiter);
+        
+        fixedLines.push(combinedLine);
+        i = nextIndex - 1; // -1 потому что цикл сам увеличит i
+      }
+      
+      i++;
+    }
+    
+    const result = fixedLines.join('\n');
+    
+    if (result !== csvContent) {
+      this.logger.debug("CSV content was modified to fix multiline fields and mixed data");
+    }
+    
+    return result;
+  }
+
+  private splitMixedCSVLine(line: string, delimiter: string): string[] {
+    // Ищем все даты в строке
+    const datePattern = /(\d{2}\.\d{2}\.\d{4})/g;
+    const datePositions: Array<{ date: string; index: number }> = [];
+    let match;
+    
+    while ((match = datePattern.exec(line)) !== null) {
+      datePositions.push({
+        date: match[1],
+        index: match.index
+      });
+    }
+    
+    if (datePositions.length < 2) {
+      return [line]; // Нет смешанных данных
+    }
+    
+    const rows: string[] = [];
+    
+    // Разделяем строку по позициям дат
+    for (let i = 0; i < datePositions.length; i++) {
+      const startPos = i === 0 ? 0 : datePositions[i].index;
+      const endPos = i === datePositions.length - 1 ? line.length : datePositions[i + 1].index;
+      
+      let rowData = line.substring(startPos, endPos).trim();
+      
+      // Очищаем каждую строку от артефактов
+      rowData = this.cleanSingleCSVRow(rowData, delimiter);
+      
+      if (rowData && this.isValidCSVRow(rowData, delimiter)) {
+        rows.push(rowData);
+      }
+    }
+    
+    return rows;
+  }
+
+  private cleanSingleCSVRow(row: string, delimiter: string): string {
+    if (!row) return '';
+    
+    // Исправляем неправильно экранированные кавычки в названии товара
+    // Паттерн: "название "внутренние кавычки"",число
+    row = row.replace(/"([^"]*)"([^"]*)"",(\d+)/g, '"$1""$2"",$3');
+    
+    // Убираем артефакты данных, попавшие в название товара
+    // Ищем паттерн где в названии есть числа и даты
+    const nameFieldMatch = row.match(/^([^,]*,[^,]*,)"([^"]*)",(\d+.*)/);
+    if (nameFieldMatch) {
+      let nameContent = nameFieldMatch[2];
+      
+      // Убираем из названия числа и даты, которые туда попали
+      nameContent = nameContent.replace(/,\d+,\d+,[\d,\s]+\d{2}\.\d{2}\.\d{4}.*$/, '');
+      
+      row = nameFieldMatch[1] + '"' + nameContent + '",' + nameFieldMatch[3];
+    }
+    
+    // Исправляем незакрытые кавычки
+    const quoteCount = (row.match(/"/g) || []).length;
+    if (quoteCount % 2 !== 0) {
+      // Ищем последнее поле в кавычках без закрывающей кавычки
+      row = row.replace(/,"([^"]*),(\d+)/g, ',"$1",$2');
+    }
+    
+    return row;
+  }
+
+  private isValidCSVRow(row: string, delimiter: string): boolean {
+    const fieldCount = this.countCSVFields(row, delimiter);
+    const hasDate = /^\d{2}\.\d{2}\.\d{4}/.test(row.trim());
+    const hasBasicFields = fieldCount >= 3;
+    
+    return hasDate && hasBasicFields;
+  }
+
+  private isCompleteCSVLine(line: string, delimiter: string): boolean {
+    // Подсчитываем кавычки
+    const quotes = (line.match(/"/g) || []).length;
+    
+    // Если нечетное количество кавычек, строка неполная
+    if (quotes % 2 !== 0) {
+      return false;
+    }
+    
+    // Проверяем минимальное количество полей (должно быть хотя бы 7 полей для Ozon)
+    const fields = this.countCSVFields(line, delimiter);
+    if (fields < 7) {
+      return false;
+    }
+    
+    return true;
+  }
+
+  private countCSVFields(line: string, delimiter: string): number {
+    let fieldCount = 1;
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        inQuotes = !inQuotes;
+      } else if (char === delimiter && !inQuotes) {
+        fieldCount++;
+      }
+    }
+    
+    return fieldCount;
+  }
+
+  private cleanProductNameField(line: string, delimiter: string): string {
+    // Ищем поле с названием товара (обычно 3-е поле) и очищаем его от артефактов
+    const fields = this.parseCSVLineSimple(line, delimiter);
+    
+    if (fields.length >= 3) {
+      let nameField = fields[2];
+      
+      // Удаляем артефакты, которые попали в название товара
+      if (nameField.includes(',') && (nameField.includes('\n') || nameField.length > 100)) {
+        // Ищем настоящее название товара - берем часть до первой запятой с числом
+        const realNameMatch = nameField.match(/^"?([^"]*?)"?(?=,\d)/);
+        if (realNameMatch) {
+          const realName = realNameMatch[1].trim();
+          this.logger.debug(`Cleaned product name: "${nameField.substring(0, 50)}..." -> "${realName}"`);
+          fields[2] = `"${realName}"`;
+          
+          // Пересобираем строку
+          return fields.join(delimiter);
+        }
+      }
+      
+      // Исправляем неправильно экранированные кавычки
+      if (nameField.includes('"') && !nameField.includes('""')) {
+        const correctedName = nameField.replace(/^"([^"]*)"([^"]*)"$/, '"$1""$2"');
+        if (correctedName !== nameField) {
+          this.logger.debug(`Fixed quotes in product name: "${nameField}" -> "${correctedName}"`);
+          fields[2] = correctedName;
+          return fields.join(delimiter);
+        }
+      }
+    }
+    
+    return line;
+  }
+
+  private parseCSVLineSimple(line: string, delimiter: string): string[] {
+    const fields: string[] = [];
+    let current = '';
+    let inQuotes = false;
+    
+    for (let i = 0; i < line.length; i++) {
+      const char = line[i];
+      
+      if (char === '"') {
+        inQuotes = !inQuotes;
+        current += char;
+      } else if (char === delimiter && !inQuotes) {
+        fields.push(current);
+        current = '';
+      } else {
+        current += char;
+      }
+    }
+    
+    fields.push(current);
+    return fields;
+  }
+
   private fixCommonCSVErrors(csvContent: string, delimiter: string): string {
-    const lines = csvContent.split("\n");
+    // Сначала исправляем многострочные поля
+    const fixedContent = this.fixMultilineFields(csvContent, delimiter);
+    
+    const lines = fixedContent.split("\n");
     const fixedLines: string[] = [];
 
     for (let i = 0; i < lines.length; i++) {
@@ -663,13 +890,18 @@ export class FileParsingProcessor {
 
     const dateField = row["Дата"] || row["Date"] || row["date"];
     const skuField = row["Артикул"] || row["SKU"] || row["sku"];
-    const nameField =
+    let nameField =
       row["Название товара"] || row["Product Name"] || row["name"];
     const priceField = row["Цена за единицу"] || row["Price"] || row["price"];
     const quantityField =
       row["Количество"] || row["Quantity"] || row["quantity"];
     const commissionField =
       row["Комиссия за продажу"] || row["Commission"] || row["commission"];
+
+    // Дополнительно очищаем название товара от артефактов
+    if (nameField) {
+      nameField = this.cleanProductName(String(nameField));
+    }
 
     console.log(`Extracted fields:`, {
       date: dateField,
@@ -773,5 +1005,51 @@ export class FileParsingProcessor {
     }
 
     return null;
+  }
+
+  private cleanProductName(name: string): string {
+    if (!name) return '';
+    
+    let cleaned = name;
+    
+    // Удаляем лишние кавычки в начале и конце
+    cleaned = cleaned.replace(/^"/, '').replace(/"$/, '');
+    
+    // Исправляем экранированные кавычки
+    cleaned = cleaned.replace(/""/g, '"');
+    
+    // ГЛАВНОЕ ИСПРАВЛЕНИЕ: удаляем все артефакты CSV данных
+    // Паттерн 1: ,число,число,последовательность чисел и запятых (артефакты из CSV)
+    cleaned = cleaned.replace(/,\d+,\d+,[\d,]+$/, '');
+    
+    // Паттерн 2: перенос строки с датой и данными (смешанные строки CSV)
+    cleaned = cleaned.replace(/\n\d{2}\.\d{2}\.\d{4}.*$/, '');
+    
+    // Паттерн 3: дата и данные после пробелов
+    cleaned = cleaned.replace(/\s+\d{2}\.\d{2}\.\d{4},\d+.*$/, '');
+    
+    // Паттерн 4: последовательность чисел и запятых, заканчивающаяся датой
+    cleaned = cleaned.replace(/,[\d,\s]*\d{2}\.\d{2}\.\d{4}.*$/, '');
+    
+    // Паттерн 5: специфичный для проблемной строки - убираем все после первого вхождения большого числа
+    if (cleaned.includes(',29810') || cleaned.match(/,\d{5}/)) {
+      const match = cleaned.match(/^([^,]*?)(?=,\d{4,})/);
+      if (match) {
+        cleaned = match[1];
+      }
+    }
+    
+    // Удаляем переносы строк и лишние пробелы
+    cleaned = cleaned.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    
+    // Удаляем завершающие кавычки, запятые и пробелы
+    cleaned = cleaned.replace(/[",\s]+$/, '');
+    
+    // Если название стало пустым, возвращаем исходное (обрезанное)
+    if (!cleaned.trim()) {
+      cleaned = name.substring(0, Math.min(name.length, 50)).replace(/[",\n]+$/, '');
+    }
+    
+    return cleaned.trim();
   }
 }

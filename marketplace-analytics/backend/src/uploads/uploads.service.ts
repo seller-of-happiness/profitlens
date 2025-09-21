@@ -257,19 +257,31 @@ export class UploadsService {
       let processedCount = 0;
       let errorCount = 0;
       
-      for (const row of parsedData) {
+      for (let i = 0; i < parsedData.length; i++) {
+        const row = parsedData[i];
         try {
+          console.log(`\n🔄 Обрабатываем строку ${i + 1}/${parsedData.length}:`);
+          console.log(`  Исходные данные:`, JSON.stringify(row, null, 2));
+          
           const mappedRow = this.mapRowToSalesData(row, marketplace);
           if (mappedRow) {
+            console.log(`  ✅ Маппинг успешен:`, JSON.stringify(mappedRow, null, 2));
+            
             const analytics = await this.analyticsService.calculateRowAnalytics(mappedRow, marketplace);
+            console.log(`  📊 Аналитика рассчитана:`, JSON.stringify(analytics, null, 2));
+            
             salesData.push({
               reportId,
               ...analytics,
             });
             processedCount++;
+            console.log(`  ✅ Строка ${i + 1} успешно обработана`);
+          } else {
+            console.log(`  ⚠️ Строка ${i + 1} пропущена - не прошла валидацию маппинга`);
           }
         } catch (error) {
-          console.warn(`⚠️ Ошибка обработки строки: ${error.message}`);
+          console.warn(`  ❌ Ошибка обработки строки ${i + 1}: ${error.message}`);
+          console.warn(`  Данные строки:`, JSON.stringify(row, null, 2));
           errorCount++;
         }
       }
@@ -330,8 +342,17 @@ export class UploadsService {
     });
     
     if (parsed.errors && parsed.errors.length > 0) {
-      console.warn(`⚠️ Ошибки парсинга CSV:`, parsed.errors.slice(0, 3));
+      console.warn(`⚠️ Ошибки парсинга CSV:`, parsed.errors);
     }
+    
+    // Выводим каждую распарсенную строку
+    console.log(`📄 Все распарсенные строки (${parsed.data.length} строк):`);
+    parsed.data.forEach((row, index) => {
+      console.log(`\n📝 Строка ${index + 1}:`);
+      Object.entries(row).forEach(([key, value]) => {
+        console.log(`  ${key}: "${value}"`);
+      });
+    });
     
     return parsed.data;
   }

@@ -3,6 +3,209 @@ const Papa = require('papaparse');
 const fs = require('fs');
 const path = require('path');
 
+// Улучшенный CSV парсер
+class ImprovedCSVParser {
+  parseCSV(content) {
+    const lines = content.split('\n');
+    const headers = this.parseCSVLine(lines[0]);
+    const data = [];
+    
+    let i = 1;
+    while (i < lines.length) {
+      if (!lines[i].trim()) {
+        i++;
+        continue;
+      }
+      
+      const { row, nextIndex } = this.parseCSVRow(lines, i, headers.length);
+      if (row) {
+        const rowObject = {};
+        headers.forEach((header, index) => {
+          rowObject[header.trim()] = row[index] || '';
+        });
+        data.push(rowObject);
+      }
+      i = nextIndex;
+    }
+    
+    return { data, headers };
+  }
+
+  parseCSVRow(lines, startIndex, expectedFields) {
+    let currentLine = startIndex;
+    let combinedLine = lines[currentLine];
+    
+    while (currentLine < lines.length && !this.isRowComplete(combinedLine, expectedFields)) {
+      currentLine++;
+      if (currentLine < lines.length) {
+        combinedLine += '\n' + lines[currentLine];
+      }
+    }
+    
+    try {
+      let fields = this.parseCSVLine(combinedLine);
+      
+      if (fields.length !== expectedFields) {
+        console.log(`⚠️ Несоответствие количества полей: ожидалось ${expectedFields}, получено ${fields.length}`);
+        fields = this.repairCSVLine(combinedLine, expectedFields);
+      }
+      
+      return { row: fields, nextIndex: currentLine + 1 };
+    } catch (error) {
+      console.error(`❌ Ошибка парсинга строки ${startIndex + 1}: ${error.message}`);
+      return { row: null, nextIndex: startIndex + 1 };
+    }
+  }
+
+  isRowComplete(line, expectedFields) {
+    try {
+      const fields = this.parseCSVLine(line);
+      return fields.length >= expectedFields;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  parseCSVLine(line) {
+    const fields = [];
+    let current = '';
+    let inQuotes = false;
+    let i = 0;
+    
+    while (i < line.length) {
+      const char = line[i];
+      const nextChar = line[i + 1];
+      
+      if (char === '"') {
+        if (inQuotes) {
+          if (nextChar === '"') {
+            current += '"';
+            i += 2;
+            continue;
+          } else {
+            inQuotes = false;
+          }
+        } else {
+          inQuotes = true;
+        }
+      } else if (char === ',' && !inQuotes) {
+        fields.push(current.trim());
+        current = '';
+        i++;
+        continue;
+      } else {
+        current += char;
+      }
+      i++;
+    }
+    
+    fields.push(current.trim());
+    return fields;
+  }
+
+  repairCSVLine(line, expectedFields) {
+    console.log('🔧 Попытка восстановления строки...');
+    
+    if (line.includes('\n')) {
+      console.log('📝 Обнаружены переносы строк - разбиваем на отдельные строки');
+      return this.splitMultipleRows(line, expectedFields);
+    }
+    
+    let fields = this.parseCSVLine(line);
+    
+    if (fields.length < expectedFields) {
+      for (let i = 0; i < fields.length; i++) {
+        const field = fields[i];
+        const dataPattern = /^(.+?),(\d+),(\d+),(\d+),(\d+),(\d+)$/;
+        const match = field.match(dataPattern);
+        if (match) {
+          console.log(`🎯 Найден паттерн объединенных данных`);
+          const cleanName = match[1].replace(/"/g, '');
+          fields.splice(i, 1, cleanName, match[2], match[3], match[4], match[5], match[6]);
+          break;
+        }
+      }
+    }
+    
+    while (fields.length < expectedFields) {
+      fields.push('');
+    }
+    
+    if (fields.length > expectedFields) {
+      fields = fields.slice(0, expectedFields);
+    }
+    
+    return fields;
+  }
+
+  splitMultipleRows(combinedLine, expectedFields) {
+    console.log('🔀 Разделение объединенной строки на отдельные записи');
+    
+    const datePattern = /(\d{2}\.\d{2}\.\d{4})/g;
+    const dates = [];
+    let match;
+    
+    while ((match = datePattern.exec(combinedLine)) !== null) {
+      dates.push({
+        date: match[1],
+        index: match.index
+      });
+    }
+    
+    if (dates.length > 1) {
+      const rows = [];
+      for (let i = 0; i < dates.length; i++) {
+        const startIndex = dates[i].index;
+        const endIndex = i < dates.length - 1 ? dates[i + 1].index : combinedLine.length;
+        const rowData = combinedLine.substring(startIndex, endIndex).trim();
+        
+        if (rowData) {
+          const cleanRow = rowData.replace(/\n/g, ',').replace(/,+/g, ',').replace(/^,|,$/g, '');
+          rows.push(cleanRow);
+        }
+      }
+      
+      if (rows.length > 0) {
+        let firstRowFields = this.parseCSVLine(rows[0]);
+        
+        if (firstRowFields.length < expectedFields) {
+          for (let i = 0; i < firstRowFields.length; i++) {
+            const field = firstRowFields[i];
+            const dataPattern = /^(.+?),(\d+),(\d+),(\d+),(\d+),(\d+)$/;
+            const match = field.match(dataPattern);
+            if (match) {
+              console.log(`🎯 Разделяем объединенное поле в восстановленной строке`);
+              const cleanName = match[1].replace(/"/g, '');
+              firstRowFields.splice(i, 1, cleanName, match[2], match[3], match[4], match[5], match[6]);
+              break;
+            }
+          }
+        }
+        
+        while (firstRowFields.length < expectedFields) {
+          firstRowFields.push('');
+        }
+        
+        return firstRowFields.slice(0, expectedFields);
+      }
+    }
+    
+    const fields = this.parseCSVLine(combinedLine);
+    while (fields.length < expectedFields) {
+      fields.push('');
+    }
+    return fields.slice(0, expectedFields);
+  }
+
+  cleanProductName(name) {
+    if (!name) return '';
+    let cleaned = name.replace(/^""|""$/g, '').replace(/""/g, '"');
+    cleaned = cleaned.replace(/,\d+,\d+,[\d,]+$/g, '');
+    cleaned = cleaned.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
+    return cleaned;
+  }
+}
+
 async function processFile(reportId, filePath, marketplace) {
   const prisma = new PrismaClient();
   
@@ -15,27 +218,12 @@ async function processFile(reportId, filePath, marketplace) {
     const fileContent = fs.readFileSync(filePath, 'utf8');
     console.log(`📄 Размер файла: ${fileContent.length} символов`);
     
-    // Парсим CSV
-    const parsed = Papa.parse(fileContent, {
-      header: true,
-      skipEmptyLines: true,
-      delimiter: ',',
-      quoteChar: '"',
-      escapeChar: '"',
-      transformHeader: (header) => header.trim(),
-    });
+    // Парсим CSV улучшенным парсером
+    const csvParser = new ImprovedCSVParser();
+    const parsed = csvParser.parseCSV(fileContent);
     
     console.log(`📋 Найдено строк данных: ${parsed.data.length}`);
-    console.log(`❌ Ошибок парсинга: ${parsed.errors.length}`);
-    
-    if (parsed.errors.length > 0) {
-      console.log('Первые 3 ошибки:');
-      parsed.errors.slice(0, 3).forEach(error => {
-        console.log(`  - ${error.message} (строка ${error.row})`);
-      });
-    }
-    
-    console.log(`📊 Заголовки: ${parsed.meta.fields?.join(', ')}`);
+    console.log(`📊 Заголовки: ${parsed.headers.join(', ')}`);
     
     // Показываем первые 3 строки
     if (parsed.data.length > 0) {
@@ -62,10 +250,13 @@ async function processFile(reportId, filePath, marketplace) {
           // Маппинг для Ozon
           const dateStr = row['Дата'];
           const sku = row['Артикул'];
-          const productName = row['Название товара'];
+          let productName = row['Название товара'];
           const price = parseFloat(row['Цена за единицу']) || 0;
           const quantity = parseInt(row['Количество']) || 0;
           const commission = parseFloat(row['Комиссия за продажу']) || 0;
+          
+          // Очищаем название товара от возможных артефактов
+          productName = csvParser.cleanProductName(productName);
           
           // Парсинг даты DD.MM.YYYY
           const dateParts = dateStr.split('.');
